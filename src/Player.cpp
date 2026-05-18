@@ -1,9 +1,10 @@
 #include "Player.h"
+#include "Input.h"
 #include <cmath>
 
 static constexpr float PLAYER_SIZE = 36.f;
-static constexpr float BASE_SPEED = 250.f;
-static constexpr int   BASE_MAX_HP = 100;
+static constexpr float BASE_SPEED = 210.f;
+static constexpr int   BASE_MAX_HP = 150;   // увеличено для лучшей выживаемости
 
 Player::Player()
     : Entity(640.f, 360.f, BASE_SPEED, BASE_MAX_HP)
@@ -48,27 +49,16 @@ void Player::reset()
     m_Items.clear();
 }
 
-void Player::handleInput(float /*dt*/)
+void Player::handleInput()
 {
-    m_Up    = sf::Keyboard::isKeyPressed(sf::Keyboard::W) || sf::Keyboard::isKeyPressed(sf::Keyboard::Up);
-    m_Down  = sf::Keyboard::isKeyPressed(sf::Keyboard::S) || sf::Keyboard::isKeyPressed(sf::Keyboard::Down);
-    m_Left  = sf::Keyboard::isKeyPressed(sf::Keyboard::A) || sf::Keyboard::isKeyPressed(sf::Keyboard::Left);
-    m_Right = sf::Keyboard::isKeyPressed(sf::Keyboard::D) || sf::Keyboard::isKeyPressed(sf::Keyboard::Right);
-
-    // Dash — Space или Shift
-    bool dashKey = sf::Keyboard::isKeyPressed(sf::Keyboard::Space) ||
-                   sf::Keyboard::isKeyPressed(sf::Keyboard::LShift);
+    // Рывок (Dash): Space или LShift
+    bool dashKey = Input::isKeyPressed(sf::Keyboard::Space) || Input::isKeyPressed(sf::Keyboard::LShift);
     if (dashKey && m_DashCooldown <= 0.f && !m_IsDashing)
     {
-        sf::Vector2f dir(0.f, 0.f);
-        if (m_Up)    dir.y -= 1.f;
-        if (m_Down)  dir.y += 1.f;
-        if (m_Left)  dir.x -= 1.f;
-        if (m_Right) dir.x += 1.f;
+        sf::Vector2f dir = Input::getMovementDirection();
         float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
         if (len > 0.f)
         {
-            dir /= len;
             m_DashDir = dir;
             m_IsDashing = true;
             m_DashTimer = m_DashDuration;
@@ -79,12 +69,10 @@ void Player::handleInput(float /*dt*/)
 
 void Player::update(float dt)
 {
-    // Обновление таймеров
     if (m_FireTimer > 0.f)      m_FireTimer -= dt;
     if (m_DashCooldown > 0.f)   m_DashCooldown -= dt;
     if (m_IFrameTimer > 0.f)    m_IFrameTimer -= dt;
 
-    // Вычисление желаемого перемещения
     sf::Vector2f dir(0.f, 0.f);
     if (m_IsDashing)
     {
@@ -94,40 +82,21 @@ void Player::update(float dt)
     }
     else
     {
-        if (m_Up)    dir.y -= 1.f;
-        if (m_Down)  dir.y += 1.f;
-        if (m_Left)  dir.x -= 1.f;
-        if (m_Right) dir.x += 1.f;
-        float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
-        if (len > 0.f) dir /= len;
+        dir = Input::getMovementDirection();
     }
 
     float speed = m_Speed * (m_IsDashing ? m_DashSpeedMult : 1.f);
     m_Desired = dir * speed * dt;
 
-    // Визуальные эффекты
     if (m_IsDashing)
-    {
         m_Shape.setFillColor(sf::Color(180, 255, 200));
-    }
     else if (m_IFrameTimer > 0.f)
-    {
-        // Мигание при i-frames
-        int t = static_cast<int>(m_IFrameTimer * 10.f);
-        if (t % 2 == 0)
-            m_Shape.setFillColor(sf::Color(255, 160, 160));
-        else
-            m_Shape.setFillColor(sf::Color(60, 200, 90));
-    }
+        m_Shape.setFillColor((static_cast<int>(m_IFrameTimer * 10.f) % 2 == 0) ?
+            sf::Color(255, 160, 160) : sf::Color(60, 200, 90));
     else
-    {
         m_Shape.setFillColor(sf::Color(60, 200, 90));
-    }
 
-    if (m_HasShield)
-        m_Shape.setOutlineColor(sf::Color(80, 220, 220));
-    else
-        m_Shape.setOutlineColor(sf::Color(20, 100, 40));
+    m_Shape.setOutlineColor(m_HasShield ? sf::Color(80, 220, 220) : sf::Color(20, 100, 40));
 }
 
 void Player::draw(sf::RenderWindow& window)
@@ -138,11 +107,8 @@ void Player::draw(sf::RenderWindow& window)
 
 sf::FloatRect Player::getBounds() const
 {
-    sf::FloatRect r(
-        m_Position.x - PLAYER_SIZE / 2.f,
-        m_Position.y - PLAYER_SIZE / 2.f,
+    return sf::FloatRect(m_Position.x - PLAYER_SIZE / 2.f, m_Position.y - PLAYER_SIZE / 2.f,
         PLAYER_SIZE, PLAYER_SIZE);
-    return r;
 }
 
 bool Player::tryShoot(sf::Vector2f worldTarget, std::vector<Projectile>& out)
@@ -156,7 +122,6 @@ bool Player::tryShoot(sf::Vector2f worldTarget, std::vector<Projectile>& out)
 
     const float PROJ_SPEED = 650.f;
     out.emplace_back(m_Position, dir * PROJ_SPEED, m_Damage, true, sf::Color(255, 230, 80));
-
     m_FireTimer = m_FireRate;
     return true;
 }
@@ -169,7 +134,6 @@ void Player::damage(int dmg)
     {
         m_HasShield = false;
         m_IFrameTimer = I_FRAME_DURATION;
-        // Убираем щит из списка
         for (auto it = m_Items.begin(); it != m_Items.end(); ++it)
         {
             if (*it == ItemType::SHIELD) { m_Items.erase(it); break; }
@@ -185,42 +149,21 @@ void Player::applyItem(ItemType type)
 {
     switch (type)
     {
-    case ItemType::HEALTH:
-        heal(30);
-        break;
-    case ItemType::DAMAGE_UP:
-        m_Damage += 10.f;
-        m_Items.push_back(type);
-        break;
-    case ItemType::SPEED_UP:
-        m_Speed += 50.f;
-        m_Items.push_back(type);
-        break;
-    case ItemType::SHIELD:
-        m_HasShield = true;
-        m_Items.push_back(type);
-        break;
-    case ItemType::COIN:
-        m_Coins += 1;
-        break;
+    case ItemType::HEALTH:    heal(30); break;
+    case ItemType::DAMAGE_UP: m_Damage += 10.f; m_Items.push_back(type); break;
+    case ItemType::SPEED_UP:  m_Speed += 50.f;  m_Items.push_back(type); break;
+    case ItemType::SHIELD:    m_HasShield = true; m_Items.push_back(type); break;
+    case ItemType::COIN:      m_Coins += 1; break;
     }
 }
 
 float Player::getDamage() const { return m_Damage; }
-void  Player::setDamage(float d) { m_Damage = d; }
-int   Player::getCoins() const { return m_Coins; }
-void  Player::addCoins(int amount) { m_Coins += amount; }
-bool  Player::hasShield() const { return m_HasShield; }
-
+void Player::setDamage(float d) { m_Damage = d; }
+int Player::getCoins() const { return m_Coins; }
+void Player::addCoins(int amount) { m_Coins += amount; }
+bool Player::hasShield() const { return m_HasShield; }
 sf::Vector2f Player::getDesiredDelta() const { return m_Desired; }
-
-void Player::applyMovement(sf::Vector2f delta)
-{
-    m_Position += delta;
-    m_Shape.setPosition(m_Position);
-}
-
+void Player::applyMovement(sf::Vector2f delta) { m_Position += delta; m_Shape.setPosition(m_Position); }
 const std::vector<ItemType>& Player::getItems() const { return m_Items; }
-
-bool Player::isDashing() const    { return m_IsDashing; }
+bool Player::isDashing() const { return m_IsDashing; }
 bool Player::isInvincible() const { return m_IFrameTimer > 0.f; }
