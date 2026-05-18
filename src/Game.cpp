@@ -1,6 +1,7 @@
 #include "Game.h"
 #include "AssetManager.h"
 #include "Utf.h"
+#include "Input.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -17,11 +18,10 @@ Game::Game()
     , m_MenuIndex(0)
     , m_NeedRestart(false)
     , m_TransitionTimer(0.f)
-    , m_MousePressedPrev(false)
-    , m_EnterPressedPrev(false)
-    , m_PausePressedPrev(false)
-    , m_InteractPressedPrev(false)
     , m_BossIntroShown(false)
+    , m_PortalActive(false)
+    , m_PortalRoomIndex(-1)
+    , m_PortalPos(0.f, 0.f)
 {
     m_Window.setFramerateLimit(60);
     m_Window.setVerticalSyncEnabled(true);
@@ -30,6 +30,13 @@ Game::Game()
 
     m_MenuItems = { "Новая игра", "Выход" };
     setupMenuTexts();
+
+    // Настройка портала
+    m_PortalShape.setRadius(25.f);
+    m_PortalShape.setOrigin(25.f, 25.f);
+    m_PortalShape.setFillColor(sf::Color(100, 200, 255, 180));
+    m_PortalShape.setOutlineColor(sf::Color(255, 255, 255));
+    m_PortalShape.setOutlineThickness(2.f);
 }
 
 void Game::setupMenuTexts()
@@ -113,7 +120,9 @@ void Game::run()
     while (m_Window.isOpen())
     {
         float dt = clock.restart().asSeconds();
-        if (dt > 0.1f) dt = 0.1f; // защита от больших скачков времени
+        if (dt > 0.1f) dt = 0.1f;
+
+        Input::update(m_Window);
 
         processEvents();
         update(dt);
@@ -200,9 +209,8 @@ void Game::processEvents()
         {
             if (m_State == GameState::MENU)
             {
-                // Проверка клика по пункту меню
                 sf::Vector2f mp(static_cast<float>(e.mouseButton.x),
-                                static_cast<float>(e.mouseButton.y));
+                    static_cast<float>(e.mouseButton.y));
                 for (size_t i = 0; i < m_MenuTexts.size(); ++i)
                 {
                     if (m_MenuTexts[i].getGlobalBounds().contains(mp))
@@ -239,15 +247,12 @@ void Game::updatePlaying(float dt)
 {
     m_HUD.tickMessage(dt);
 
-    // Ввод игрока
-    m_Player.handleInput(dt);
+    m_Player.handleInput();
     m_Player.update(dt);
 
-    // Перемещение с коллизиями
     resolvePlayerWallCollision(m_Player.getDesiredDelta());
 
-    // Стрельба
-    if (sf::Mouse::isButtonPressed(sf::Mouse::Left))
+    if (Input::isMouseButtonPressed(sf::Mouse::Left))
     {
         handlePlayerShoot();
     }
@@ -257,17 +262,14 @@ void Game::updatePlaying(float dt)
     {
         if (!e->isAlive()) continue;
         e->update(dt, m_Player.getPosition(), m_Projectiles, m_Room);
-
-        // Удержать в пределах комнаты
         sf::Vector2f p = e->getPosition();
         float margin = e->getRadius();
-        p.x = std::clamp(p.x, margin,
-            static_cast<float>(Room::GRID_WIDTH * Room::TILE_SIZE) - margin);
-        p.y = std::clamp(p.y, margin,
-            static_cast<float>(Room::GRID_HEIGHT * Room::TILE_SIZE) - margin);
+        p.x = std::max(margin, std::min(p.x, static_cast<float>(Room::GRID_WIDTH * Room::TILE_SIZE) - margin));
+        p.y = std::max(margin, std::min(p.y, static_cast<float>(Room::GRID_HEIGHT * Room::TILE_SIZE) - margin));
         e->setPosition(p);
     }
 
+    // Коллизии между врагами
     const int COLLISION_ITERATIONS = 3;
     for (int iter = 0; iter < COLLISION_ITERATIONS; ++iter) {
         for (size_t i = 0; i < m_Enemies.size(); ++i) {
@@ -288,8 +290,6 @@ void Game::updatePlaying(float dt)
                     float dist = std::sqrt(distSq);
                     sf::Vector2f normal = delta / dist;
                     float overlap = minDist - dist;
-
-                    // Смещаем обоих врагов в противоположные стороны
                     sf::Vector2f correction = normal * (overlap * 0.5f);
                     m_Enemies[i]->setPosition(pos1 - correction);
                     m_Enemies[j]->setPosition(pos2 + correction);
@@ -298,23 +298,9 @@ void Game::updatePlaying(float dt)
         }
     }
 
-    // Обновление снарядов
+    // Снаряды
     for (auto& p : m_Projectiles) p.update(dt);
 
-    // Коллизия снарядов (чтобы в стены врезались)
-    for (auto& proj : m_Projectiles) {
-        if (proj.isDead()) continue;
-
-        sf::FloatRect bounds = proj.getBounds();
-        if (m_Room.isSolid(bounds.left, bounds.top, false) ||
-            m_Room.isSolid(bounds.left + bounds.width, bounds.top, false) ||
-            m_Room.isSolid(bounds.left, bounds.top + bounds.height, false) ||
-            m_Room.isSolid(bounds.left + bounds.width, bounds.top + bounds.height, false)) {
-            proj.kill();
-        }
-    }
-
-    // Коллизии снарядов
     sf::FloatRect pb = m_Player.getBounds();
     for (auto& proj : m_Projectiles)
     {
@@ -322,7 +308,6 @@ void Game::updatePlaying(float dt)
 
         if (proj.isFromPlayer())
         {
-            // Снаряд игрока -> враги
             for (auto& e : m_Enemies)
             {
                 if (!e->isAlive()) continue;
@@ -334,11 +319,10 @@ void Game::updatePlaying(float dt)
                     if (!e->isAlive())
                     {
                         m_Score += e->getScoreValue();
-                        // Шанс дропа монет
                         std::mt19937 rng(static_cast<unsigned>(
                             std::chrono::steady_clock::now().time_since_epoch().count()));
                         int roll = rng() % 100;
-                        if (e->getType() != EnemyType::BOSS && roll < 45)
+                        if (e->getType() != EnemyType::BOSS && roll < 20)   // 20% шанс монеты
                         {
                             m_Items.emplace_back(ItemType::COIN, e->getPosition());
                         }
@@ -349,7 +333,6 @@ void Game::updatePlaying(float dt)
         }
         else
         {
-            // Снаряд врага -> игрок
             if (proj.getBounds().intersects(pb))
             {
                 m_Player.damage(static_cast<int>(proj.getDamage()));
@@ -357,8 +340,15 @@ void Game::updatePlaying(float dt)
                 if (!m_Player.isAlive()) break;
             }
         }
+        // Стены
+        sf::FloatRect bounds = proj.getBounds();
+        if (m_Room.isSolid(bounds.left, bounds.top, false) ||
+            m_Room.isSolid(bounds.left + bounds.width, bounds.top, false) ||
+            m_Room.isSolid(bounds.left, bounds.top + bounds.height, false) ||
+            m_Room.isSolid(bounds.left + bounds.width, bounds.top + bounds.height, false)) {
+            proj.kill();
+        }
     }
-    // Удаление мёртвых и вышедших за пределы снарядов
     m_Projectiles.erase(std::remove_if(m_Projectiles.begin(), m_Projectiles.end(),
         [](const Projectile& p) {
             return p.isExpired() || p.isDead()
@@ -366,7 +356,7 @@ void Game::updatePlaying(float dt)
                 || p.getPosition().y < -50.f || p.getPosition().y > Room::GRID_HEIGHT * Room::TILE_SIZE + 50.f;
         }), m_Projectiles.end());
 
-    // Контактный урон от врагов
+    // Контактный урон
     if (m_Player.isAlive())
     {
         for (auto& e : m_Enemies)
@@ -380,17 +370,15 @@ void Game::updatePlaying(float dt)
         }
     }
 
-    // Подбор предметов
+    // Предметы
     for (auto& item : m_Items)
     {
         if (item.isCollected()) continue;
         if (item.getBounds().intersects(m_Player.getBounds()))
         {
-            // В магазине: требуется взаимодействие и оплата
             if (m_Level.getCurrentNode().type == RoomType::SHOP && item.getCost() > 0)
             {
-                bool interact = sf::Keyboard::isKeyPressed(sf::Keyboard::E);
-                if (interact && !m_InteractPressedPrev)
+                if (Input::isKeyJustPressed(sf::Keyboard::E))
                 {
                     if (m_Player.getCoins() >= item.getCost())
                     {
@@ -402,13 +390,13 @@ void Game::updatePlaying(float dt)
                     else
                     {
                         m_HUD.setMessage("Не хватает монет (" +
-                                         std::to_string(item.getCost()) + ")", 1.5f);
+                            std::to_string(item.getCost()) + ")", 1.5f);
                     }
                 }
-                else if (!interact)
+                else
                 {
                     m_HUD.setMessage("E — купить за " +
-                                     std::to_string(item.getCost()) + " монет", 0.1f);
+                        std::to_string(item.getCost()) + " монет", 0.1f);
                 }
             }
             else
@@ -424,9 +412,7 @@ void Game::updatePlaying(float dt)
     m_Items.erase(std::remove_if(m_Items.begin(), m_Items.end(),
         [](const Item& i) { return i.isCollected(); }), m_Items.end());
 
-    m_InteractPressedPrev = sf::Keyboard::isKeyPressed(sf::Keyboard::E);
-
-    // Проверка очистки комнаты
+    // Очистка комнаты
     if (!m_Level.getCurrentNode().cleared)
     {
         bool anyAlive = false;
@@ -440,6 +426,43 @@ void Game::updatePlaying(float dt)
     // Переход между комнатами
     checkRoomTransitions();
 
+    // *** Портал: активен только в той комнате, где был открыт ***
+    if (m_PortalRoomIndex == m_Level.getCurrentRoomIndex())
+    {
+        m_PortalActive = true;
+    }
+    else
+    {
+        m_PortalActive = false;
+    }
+
+    if (m_PortalActive)
+    {
+        // Анимация пульсации
+        float phase = std::sin(m_TransitionTimer * 6.f) * 0.2f + 0.8f;
+        m_PortalShape.setScale(phase, phase);
+        m_PortalShape.setPosition(m_PortalPos);
+
+        if (m_Player.getBounds().intersects(m_PortalShape.getGlobalBounds()))
+        {
+            if (m_Level.getFloorNumber() < MAX_FLOORS)
+            {
+                loadFloor(m_Level.getFloorNumber() + 1);
+                m_PortalActive = false;
+                m_PortalRoomIndex = -1;
+            }
+            else
+            {
+                if (m_Score > m_HighScore)
+                {
+                    m_HighScore = m_Score;
+                    saveHighScore();
+                }
+                m_State = GameState::VICTORY;
+            }
+        }
+    }
+
     // Смерть игрока
     if (!m_Player.isAlive())
     {
@@ -451,30 +474,25 @@ void Game::updatePlaying(float dt)
         m_State = GameState::GAME_OVER;
     }
 
-    // Обновить HUD
+    m_TransitionTimer += dt;
     m_HUD.update(m_Player, m_Score, m_HighScore, m_Level);
 }
 
 void Game::resolvePlayerWallCollision(sf::Vector2f desired)
 {
-    // Пытаемся двигаться по X, затем по Y, проверяя коллизии.
     sf::Vector2f pos = m_Player.getPosition();
 
-    // По X
     float newX = pos.x + desired.x;
     sf::FloatRect testX(newX - 18.f, pos.y - 18.f, 36.f, 36.f);
-    bool blockX =
-        m_Room.isSolid(testX.left, testX.top, false) ||
+    bool blockX = m_Room.isSolid(testX.left, testX.top, false) ||
         m_Room.isSolid(testX.left + testX.width - 1, testX.top, false) ||
         m_Room.isSolid(testX.left, testX.top + testX.height - 1, false) ||
         m_Room.isSolid(testX.left + testX.width - 1, testX.top + testX.height - 1, false);
     if (!blockX) pos.x = newX;
 
-    // По Y
     float newY = pos.y + desired.y;
     sf::FloatRect testY(pos.x - 18.f, newY - 18.f, 36.f, 36.f);
-    bool blockY =
-        m_Room.isSolid(testY.left, testY.top, false) ||
+    bool blockY = m_Room.isSolid(testY.left, testY.top, false) ||
         m_Room.isSolid(testY.left + testY.width - 1, testY.top, false) ||
         m_Room.isSolid(testY.left, testY.top + testY.height - 1, false) ||
         m_Room.isSolid(testY.left + testY.width - 1, testY.top + testY.height - 1, false);
@@ -485,7 +503,6 @@ void Game::resolvePlayerWallCollision(sf::Vector2f desired)
 
 void Game::checkRoomTransitions()
 {
-    // Двери разблокированы только если комната пройдена
     if (!m_Level.getCurrentNode().cleared) return;
 
     sf::FloatRect pb = m_Player.getBounds();
@@ -511,14 +528,8 @@ void Game::checkRoomTransitions()
 
 void Game::handlePlayerShoot()
 {
-    sf::Vector2f target = worldMousePos();
+    sf::Vector2f target = Input::getMouseWorldPosition();
     m_Player.tryShoot(target, m_Projectiles);
-}
-
-sf::Vector2f Game::worldMousePos() const
-{
-    sf::Vector2i mp = sf::Mouse::getPosition(m_Window);
-    return sf::Vector2f(static_cast<float>(mp.x), static_cast<float>(mp.y));
 }
 
 void Game::newGame()
@@ -529,6 +540,8 @@ void Game::newGame()
     m_Enemies.clear();
     m_Items.clear();
     m_BossIntroShown = false;
+    m_PortalActive = false;
+    m_PortalRoomIndex = -1;
 
     loadFloor(1);
     m_State = GameState::PLAYING;
@@ -536,6 +549,8 @@ void Game::newGame()
 
 void Game::loadFloor(int floorNum)
 {
+    m_PortalActive = false;
+    m_PortalRoomIndex = -1;
     std::random_device rd;
     unsigned int seed = rd() ^ (static_cast<unsigned>(floorNum) * 0x9E3779B9u);
     m_Level.generate(floorNum, seed);
@@ -555,7 +570,6 @@ void Game::loadCurrentRoom()
     auto doors = m_Level.getCurrentDoors();
     RoomType type = m_Level.getCurrentNode().type;
 
-    // Детерминированный seed по позиции + номеру этажа
     unsigned int roomSeed = static_cast<unsigned int>(
         m_Level.getCurrentRoomIndex() * 131
         + m_Level.getFloorNumber() * 977
@@ -564,14 +578,11 @@ void Game::loadCurrentRoom()
         + 1);
 
     m_Room.generate(type, doors, roomSeed);
-
     spawnRoomContent();
 
-    // Двери: закрыты, если комната не пройдена
     bool cleared = m_Level.getCurrentNode().cleared;
     m_Room.setDoorsLocked(!cleared);
 
-    // Специальные сообщения
     if (type == RoomType::BOSS && !m_Level.getCurrentNode().cleared && !m_BossIntroShown)
     {
         m_HUD.setMessage("БОСС! Подготовьтесь.", 2.5f);
@@ -598,12 +609,26 @@ void Game::spawnRoomContent()
     RoomType type = m_Level.getCurrentNode().type;
     int floor = m_Level.getFloorNumber();
 
+    // Вспомогательная лямбда для получения радиуса врага
+    auto getEnemyRadius = [](EnemyType et) -> float {
+        switch (et) {
+        case EnemyType::SLIME:     return 20.f;
+        case EnemyType::SHOOTER:   return 18.f;
+        case EnemyType::BERSERKER: return 24.f;
+        case EnemyType::BOSS:      return 42.f;
+        default:                   return 16.f;
+        }
+        };
+
     if (type == RoomType::NORMAL && !m_Level.getCurrentNode().cleared)
     {
         int baseCount = 2 + (floor - 1);
         int enemyCount = baseCount + (int)(rng() % 2);
+        float defaultRadius = getEnemyRadius(EnemyType::BERSERKER);
         auto points = m_Room.getSpawnPoints(enemyCount,
-            static_cast<int>(m_Level.getCurrentRoomIndex() + floor * 31));
+            static_cast<int>(m_Level.getCurrentRoomIndex() + floor * 31),
+            defaultRadius);
+
         for (auto& p : points)
         {
             int roll = (int)(rng() % 100);
@@ -617,11 +642,17 @@ void Game::spawnRoomContent()
     else if (type == RoomType::BOSS && !m_Level.getCurrentNode().cleared)
     {
         sf::Vector2f c = m_Room.getCenter();
+        float bossRadius = getEnemyRadius(EnemyType::BOSS);
+        sf::FloatRect bossBox(c.x - bossRadius, c.y - 80.f - bossRadius,
+            bossRadius * 2.f, bossRadius * 2.f);
+        if (m_Room.isRectSolid(bossBox))
+        {
+            c.y -= bossRadius;
+        }
         m_Enemies.push_back(std::make_unique<Enemy>(EnemyType::BOSS, c.x, c.y - 80.f, floor));
     }
     else if (type == RoomType::ITEM && !m_Level.getCurrentNode().cleared)
     {
-        // 1 бесплатный предмет по центру
         auto c = m_Room.getCenter();
         int roll = (int)(rng() % 4);
         ItemType it;
@@ -636,13 +667,11 @@ void Game::spawnRoomContent()
     }
     else if (type == RoomType::SHOP && !m_Level.getCurrentNode().cleared)
     {
-        // 3 предмета с ценой
         float baseX = m_Room.getCenter().x - 140.f;
         float y = m_Room.getCenter().y;
-        m_Items.emplace_back(ItemType::HEALTH,    sf::Vector2f(baseX,      y), 3);
-        m_Items.emplace_back(ItemType::DAMAGE_UP, sf::Vector2f(baseX+140,  y), 5);
-        m_Items.emplace_back(ItemType::SHIELD,    sf::Vector2f(baseX+280,  y), 7);
-        // Магазин сразу "пройден", двери открыты
+        m_Items.emplace_back(ItemType::HEALTH, sf::Vector2f(baseX, y), 5);
+        m_Items.emplace_back(ItemType::DAMAGE_UP, sf::Vector2f(baseX + 140, y), 8);
+        m_Items.emplace_back(ItemType::SHIELD, sf::Vector2f(baseX + 280, y), 10);
         m_Level.markCurrentCleared();
     }
 }
@@ -657,26 +686,14 @@ void Game::onRoomCleared()
     if (type == RoomType::BOSS)
     {
         m_Score += 100;
-        // Награда — предмет
         auto c = m_Room.getCenter();
         m_Items.emplace_back(ItemType::HEALTH, c);
 
-        if (m_Level.getFloorNumber() < MAX_FLOORS)
-        {
-            // Следующий этаж
-            m_HUD.setMessage("Этаж пройден! Следующий уровень...", 2.0f);
-            loadFloor(m_Level.getFloorNumber() + 1);
-        }
-        else
-        {
-            // Победа
-            if (m_Score > m_HighScore)
-            {
-                m_HighScore = m_Score;
-                saveHighScore();
-            }
-            m_State = GameState::VICTORY;
-        }
+        // Активация портала в этой комнате
+        m_PortalRoomIndex = m_Level.getCurrentRoomIndex();
+        m_PortalActive = true;
+        m_PortalPos = c + sf::Vector2f(0.f, -50.f); // над центром
+        m_HUD.setMessage("Портал открыт! Идите к нему, чтобы перейти на следующий этаж.", 3.f);
     }
     else
     {
@@ -698,23 +715,23 @@ void Game::render()
         if (m_State == GameState::PAUSED)
         {
             drawOverlay("ПАУЗА", "Enter — продолжить, Esc — в меню",
-                        sf::Color(230, 230, 230));
+                sf::Color(230, 230, 230));
         }
         else if (m_State == GameState::GAME_OVER)
         {
             drawOverlay("GAME OVER",
-                        "Счёт: " + std::to_string(m_Score) +
-                        "   Рекорд: " + std::to_string(m_HighScore) +
-                        "\nEnter — начать заново, Esc — в меню",
-                        sf::Color(230, 80, 80));
+                "Счёт: " + std::to_string(m_Score) +
+                "   Рекорд: " + std::to_string(m_HighScore) +
+                "\nEnter — начать заново, Esc — в меню",
+                sf::Color(230, 80, 80));
         }
         else if (m_State == GameState::VICTORY)
         {
             drawOverlay("ПОБЕДА!",
-                        "Счёт: " + std::to_string(m_Score) +
-                        "   Рекорд: " + std::to_string(m_HighScore) +
-                        "\nEnter — заново, Esc — в меню",
-                        sf::Color(120, 240, 140));
+                "Счёт: " + std::to_string(m_Score) +
+                "   Рекорд: " + std::to_string(m_HighScore) +
+                "\nEnter — заново, Esc — в меню",
+                sf::Color(120, 240, 140));
         }
     }
 
@@ -725,7 +742,6 @@ void Game::drawMenu()
 {
     if (!AssetManager::instance().isFontLoaded())
     {
-        // Fallback: просто нарисуем прямоугольники меню
         sf::RectangleShape bg({ WIN_WIDTH, WIN_HEIGHT });
         bg.setFillColor(sf::Color(20, 20, 30));
         m_Window.draw(bg);
@@ -735,8 +751,8 @@ void Game::drawMenu()
             btn.setOrigin(150.f, 25.f);
             btn.setPosition(WIN_WIDTH / 2.f, 340.f + i * 60.f);
             btn.setFillColor((int)i == m_MenuIndex
-                             ? sf::Color(80, 80, 140)
-                             : sf::Color(40, 40, 60));
+                ? sf::Color(80, 80, 140)
+                : sf::Color(40, 40, 60));
             m_Window.draw(btn);
         }
         return;
@@ -752,20 +768,11 @@ void Game::drawMenu()
 void Game::drawPlaying()
 {
     m_Room.draw(m_Window);
-
-    // Предметы
     for (auto& item : m_Items) item.draw(m_Window);
-
-    // Снаряды
     for (auto& p : m_Projectiles) p.draw(m_Window);
-
-    // Враги
     for (auto& e : m_Enemies) e->draw(m_Window);
-
-    // Игрок
     m_Player.draw(m_Window);
-
-    // HUD
+    if (m_PortalActive) m_Window.draw(m_PortalShape);
     m_HUD.draw(m_Window);
 }
 
@@ -800,7 +807,6 @@ void Game::drawOverlay(const std::string& title, const std::string& subtitle, sf
     s.setPosition(WIN_WIDTH / 2.f, 330.f);
     m_Window.draw(s);
 
-    // Дополнительные пункты для паузы
     if (m_State == GameState::PAUSED)
     {
         const char* items[] = { "Продолжить", "Выйти в меню" };
