@@ -116,4 +116,9 @@ private:
 
     // Вход в босс-комнату: показать сообщение
     bool m_BossIntroShown;
+
+    bool m_PortalActive;
+    int m_PortalRoomIndex;
+    sf::Vector2f m_PortalPos;
+    sf::CircleShape m_PortalShape;
 };
