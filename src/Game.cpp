@@ -1,4 +1,4 @@
-#include "Game.h"
+#include "Item.h"
 #include "AssetManager.h"
 #include "Utf.h"
 #include "Input.h"
@@ -506,24 +506,15 @@ void Game::checkRoomTransitions()
 {
     if (!m_Level.getCurrentNode().cleared) return;
 
-    sf::FloatRect pb = m_Player.getBounds();
-    for (int i = 0; i < 4; ++i)
+    if (AssetManager::instance().isFontLoaded())
     {
-        Direction dir = (Direction)i;
-        if (!m_Room.hasDoor(dir)) continue;
-        if (m_Room.isAtDoor(pb, dir))
-        {
-            Direction fromDir;
-            if (m_Level.moveInDirection(dir, fromDir))
-            {
-                loadCurrentRoom();
-                sf::Vector2f entry = m_Room.getEntryPosition(fromDir);
-                m_Player.setPosition(entry);
-                m_Projectiles.clear();
-                m_HUD.setMessage("", 0.f);
-                return;
-            }
-        }
+        m_Label.setFont(AssetManager::instance().getFont());
+        m_Label.setString(getLabel(type));
+        m_Label.setCharacterSize(type == ItemType::COIN ? 10 : 16);
+        m_Label.setFillColor(sf::Color::White);
+        auto lb = m_Label.getLocalBounds();
+        m_Label.setOrigin(lb.left + lb.width / 2.f, lb.top + lb.height / 2.f);
+        m_Label.setPosition(m_Position);
     }
 }
 
@@ -634,7 +625,7 @@ void Game::loadCurrentRoom()
     }
 }
 
-void Game::spawnRoomContent()
+std::string Item::getDescription(ItemType type)
 {
     std::mt19937 rng(static_cast<unsigned>(
         m_Level.getCurrentRoomIndex() * 7919
@@ -711,9 +702,10 @@ void Game::spawnRoomContent()
         m_WorldItems.emplace_back(Item(ItemType::SHIELD, sf::Vector2f(baseX + 280, y), 10), currentRoomIdx);
         m_Level.markCurrentCleared();
     }
+    return "";
 }
 
-void Game::onRoomCleared()
+sf::Color Item::getColor(ItemType type)
 {
     m_Level.markCurrentCleared();
     m_Room.setDoorsLocked(false);
@@ -886,15 +878,24 @@ void Game::loadHighScore()
     }
     else
     {
-        m_HighScore = 0;
+    case ItemType::HEALTH:    return sf::Color(50, 180, 50);
+    case ItemType::DAMAGE_UP: return sf::Color(200, 50, 50);
+    case ItemType::SPEED_UP:  return sf::Color(50, 100, 220);
+    case ItemType::SHIELD:    return sf::Color(50, 200, 200);
+    case ItemType::COIN:      return sf::Color(240, 200, 40);
     }
+    return sf::Color::White;
 }
 
-void Game::saveHighScore()
+std::string Item::getLabel(ItemType type)
 {
-    std::ofstream f(HIGHSCORE_FILE, std::ios::trunc);
-    if (f.is_open())
+    switch (type)
     {
-        f << m_HighScore;
+    case ItemType::HEALTH:    return "+";
+    case ItemType::DAMAGE_UP: return "D";
+    case ItemType::SPEED_UP:  return "S";
+    case ItemType::SHIELD:    return "O";
+    case ItemType::COIN:      return "$";
     }
+    return "?";
 }

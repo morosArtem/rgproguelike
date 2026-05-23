@@ -150,15 +150,15 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
 {
     std::vector<sf::Vector2f> result;
     std::mt19937 rng(seed ^ 0x5A5A);
-    std::uniform_int_distribution<int> xDist(1, GRID_WIDTH - 2);  // Изменено: 1 и -2 вместо 2 и -3
-    std::uniform_int_distribution<int> yDist(1, GRID_HEIGHT - 2); // Изменено: 1 и -2 вместо 2 и -3
+    std::uniform_int_distribution<int> xDist(1, GRID_WIDTH - 2);  // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ: 1 пїЅ -2 пїЅпїЅпїЅпїЅпїЅпїЅ 2 пїЅ -3
+    std::uniform_int_distribution<int> yDist(1, GRID_HEIGHT - 2); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ: 1 пїЅ -2 пїЅпїЅпїЅпїЅпїЅпїЅ 2 пїЅ -3
 
     int attempts = 0;
     while ((int)result.size() < count && attempts < 400)
     {
         int gx = xDist(rng), gy = yDist(rng);
 
-        // Проверяем, что клетка - пол (не стена и не дверь)
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ - пїЅпїЅпїЅ (пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ)
         if (m_Grid[gy][gx] != 0)
         {
             attempts++;
@@ -167,17 +167,17 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
 
         sf::Vector2f p((gx + 0.5f) * TILE_SIZE, (gy + 0.5f) * TILE_SIZE);
 
-        // УСИЛЕННАЯ ПРОВЕРКА: создаём прямоугольник врага и проверяем все его углы
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ: пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
         bool validSpot = true;
 
         if (entityRadius > 0.f) {
-            // Проверяем не только центр, но и все четыре угла + края
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ + пїЅпїЅпїЅпїЅ
             float left = p.x - entityRadius;
             float right = p.x + entityRadius;
             float top = p.y - entityRadius;
             float bottom = p.y + entityRadius;
 
-            // Проверяем углы
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
             if (isSolid(left, top, false) ||
                 isSolid(right, top, false) ||
                 isSolid(left, bottom, false) ||
@@ -186,7 +186,7 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
                 validSpot = false;
             }
 
-            // Дополнительная проверка: центр клеток вокруг
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ: пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
             if (validSpot) {
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dx = -1; dx <= 1; ++dx) {
@@ -194,8 +194,8 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
                         int checkY = gy + dy;
                         if (checkX >= 0 && checkX < GRID_WIDTH &&
                             checkY >= 0 && checkY < GRID_HEIGHT) {
-                            if (m_Grid[checkY][checkX] == 1) { // Стена рядом
-                                // Проверяем, не слишком ли близко
+                            if (m_Grid[checkY][checkX] == 1) { // пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
+                                // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
                                 float wallCenterX = (checkX + 0.5f) * TILE_SIZE;
                                 float wallCenterY = (checkY + 0.5f) * TILE_SIZE;
                                 float dxW = p.x - wallCenterX;
@@ -218,11 +218,11 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
             continue;
         }
 
-        // Проверка, чтобы враги не спавнились слишком близко друг к другу
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ
         bool tooClose = false;
         for (auto& e : result) {
             float dx = e.x - p.x, dy = e.y - p.y;
-            float minDist = entityRadius * 2.5f; // Увеличено с 2.0f до 2.5f
+            float minDist = entityRadius * 2.5f; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ 2.0f пїЅпїЅ 2.5f
             if (dx * dx + dy * dy < minDist * minDist) {
                 tooClose = true;
                 break;
@@ -238,12 +238,12 @@ std::vector<sf::Vector2f> Room::getSpawnPoints(int count, int seed, float entity
         attempts++;
     }
 
-    // Если не удалось найти достаточно мест, используем fallback - центр комнаты
+    // пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ fallback - пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
     if ((int)result.size() < count && count > 0) {
         sf::Vector2f center = getCenter();
         bool centerValid = true;
 
-        // Проверяем центр
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
         float left = center.x - entityRadius;
         float right = center.x + entityRadius;
         float top = center.y - entityRadius;
