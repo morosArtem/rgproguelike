@@ -17,6 +17,7 @@ class Item
 {
 public:
     Item(ItemType type, sf::Vector2f position, int cost = 0);
+    Item(const Item& other);
 
     void draw(sf::RenderWindow& window);
 
@@ -25,6 +26,8 @@ public:
     bool isCollected() const;
     void collect();
     int getCost() const;
+
+    sf::Vector2f getPosition() const { return m_Position; }
 
     static std::string getDescription(ItemType type);
     static sf::Color getColor(ItemType type);

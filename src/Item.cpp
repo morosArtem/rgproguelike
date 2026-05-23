@@ -27,6 +27,34 @@ Item::Item(ItemType type, sf::Vector2f position, int cost)
     }
 }
 
+Item::Item(const Item& other)
+    : m_Type(other.m_Type)
+    , m_Position(other.m_Position)
+    , m_Collected(other.m_Collected)
+    , m_Cost(other.m_Cost)
+{
+    // Создаём форму такого же размера, как у оригинального предмета
+    float size = (m_Type == ItemType::COIN) ? 16.f : 30.f;
+    m_Shape.setSize({ size, size });
+    m_Shape.setOrigin(size / 2.f, size / 2.f);
+    m_Shape.setPosition(m_Position);
+    m_Shape.setFillColor(getColor(m_Type));
+    m_Shape.setOutlineColor(sf::Color::White);
+    m_Shape.setOutlineThickness(1.f);
+
+    // Копируем текст, если шрифт загружен
+    if (AssetManager::instance().isFontLoaded())
+    {
+        m_Label.setFont(AssetManager::instance().getFont());
+        m_Label.setString(getLabel(m_Type));
+        m_Label.setCharacterSize(m_Type == ItemType::COIN ? 10 : 16);
+        m_Label.setFillColor(sf::Color::White);
+        auto lb = m_Label.getLocalBounds();
+        m_Label.setOrigin(lb.left + lb.width / 2.f, lb.top + lb.height / 2.f);
+        m_Label.setPosition(m_Position);
+    }
+}
+
 void Item::draw(sf::RenderWindow& window)
 {
     if (m_Collected) return;

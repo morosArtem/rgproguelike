@@ -10,6 +10,18 @@
 #include "Level.h"
 #include "HUD.h"
 
+// Добавьте где-нибудь в начале файла Game.h, после #include
+struct WorldItem
+{
+    Item item;
+    int roomIndex;  // индекс комнаты, где лежит предмет
+    bool collected;
+
+    WorldItem(const Item& i, int idx)
+        : item(i), roomIndex(idx), collected(false) {
+    }
+};
+
 // Состояние игры
 enum class GameState
 {
@@ -45,7 +57,7 @@ private:
 
     std::vector<std::unique_ptr<Enemy>> m_Enemies;
     std::vector<Projectile> m_Projectiles;
-    std::vector<Item> m_Items;
+    std::vector<WorldItem> m_WorldItems;  // вместо std::vector<Item> m_Items
 
     // Очки
     int m_Score;
@@ -116,4 +128,9 @@ private:
 
     // Вход в босс-комнату: показать сообщение
     bool m_BossIntroShown;
+
+    bool m_PortalActive;
+    int m_PortalRoomIndex;
+    sf::Vector2f m_PortalPos;
+    sf::CircleShape m_PortalShape;
 };

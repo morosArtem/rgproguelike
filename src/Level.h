@@ -9,11 +9,14 @@
 // Узел карты этажа
 struct RoomNode
 {
-    int x = 0, y = 0;           // позиция в сетке этажа
+    int x = 0, y = 0;
     RoomType type = RoomType::NORMAL;
     bool visited = false;
     bool cleared = false;
-    std::array<int, 4> neighbors = { -1, -1, -1, -1 }; // индексы соседей (N,S,W,E)
+    std::array<int, 4> neighbors = { -1, -1, -1, -1 };
+    std::vector<Item> items;
+    Room savedRoom;           // ← ДОБАВЬТЕ ЭТУ СТРОЧКУ
+    bool roomGenerated = false; // ← И ЭТУ СТРОЧКУ
 };
 
 // Этаж — граф комнат

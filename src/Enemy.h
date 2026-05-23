@@ -1,26 +1,23 @@
 #pragma once
 #include "Entity.h"
 #include "Projectile.h"
+#include "Room.h"
 #include <vector>
 
-// Типы врагов
 enum class EnemyType
 {
-    SLIME,      // движется к игроку, урон при касании
-    SHOOTER,    // держит дистанцию, стреляет
-    BERSERKER,  // быстро бросается к игроку
-    BOSS        // финальная комната, несколько фаз
+    SLIME,
+    SHOOTER,
+    BERSERKER,
+    BOSS
 };
 
-// Враг — базовая реализация с разным поведением по типу
 class Enemy : public Entity
 {
 public:
     Enemy(EnemyType type, float x, float y, int difficulty = 1);
 
-    // Обновление поведения (ИИ). Может добавить снаряды в out.
-    void update(float dt, sf::Vector2f playerPos, std::vector<Projectile>& out);
-
+    void update(float dt, sf::Vector2f playerPos, std::vector<Projectile>& out, const Room& room);
     void draw(sf::RenderWindow& window) override;
     sf::FloatRect getBounds() const override;
 
@@ -28,11 +25,9 @@ public:
     float getDamage() const;
     int getScoreValue() const;
 
-    // Контактный урон — наносит ли урон при касании с игроком
     bool canContactDamage() const;
-
-    // Вспышка урона (после попадания)
     void flashHit();
+    float getRadius() const { return m_Radius; }
 
 private:
     EnemyType m_Type;
@@ -43,19 +38,13 @@ private:
     float m_AttackTimer;
     float m_HitFlashTimer;
 
-    // Для берсерка — состояние атаки-рывка
     bool  m_Charging;
     float m_ChargeCooldown;
     sf::Vector2f m_ChargeDir;
 
-    // Для босса — номер фазы
     int m_BossPhase;
-
-    // Для шутера — желаемая дистанция до игрока
     float m_PreferredDistance;
-
     float m_Radius;
-
     int m_ScoreValue;
 
     void setupByType(int difficulty);
