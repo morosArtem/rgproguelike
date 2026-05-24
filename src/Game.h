@@ -9,12 +9,14 @@
 #include "Room.h"
 #include "Level.h"
 #include "HUD.h"
+#include "UpgradeSelectionUI.h"
+#include "SettingsMenu.h"
 
-// Добавьте где-нибудь в начале файла Game.h, после #include
+// World item structure
 struct WorldItem
 {
     Item item;
-    int roomIndex;  // индекс комнаты, где лежит предмет
+    int roomIndex;
     bool collected;
 
     WorldItem(const Item& i, int idx)
@@ -22,7 +24,7 @@ struct WorldItem
     }
 };
 
-// Состояние игры
+// Game state enum
 enum class GameState
 {
     MENU,
@@ -32,13 +34,12 @@ enum class GameState
     VICTORY
 };
 
-// Главный класс — игровой цикл, состояние, координация всех систем
+// Main game class
 class Game
 {
 public:
     Game();
 
-    // Главный цикл игры
     void run();
 
 private:
@@ -46,10 +47,12 @@ private:
     static constexpr int WIN_HEIGHT = 720;
     static constexpr int MAX_FLOORS = 2;
 
+    UpgradeSelectionUI m_UpgradeUI;
+
     sf::RenderWindow m_Window;
     GameState m_State;
 
-    // Игровые сущности
+    // Game entities
     Player m_Player;
     Room m_Room;
     Level m_Level;
@@ -57,13 +60,13 @@ private:
 
     std::vector<std::unique_ptr<Enemy>> m_Enemies;
     std::vector<Projectile> m_Projectiles;
-    std::vector<WorldItem> m_WorldItems;  // вместо std::vector<Item> m_Items
+    std::vector<WorldItem> m_WorldItems;
 
-    // Очки
+    // Score
     int m_Score;
     int m_HighScore;
 
-    // Меню
+    // Menu
     int m_MenuIndex;
     std::vector<std::string> m_MenuItems;
     sf::Text m_Title;
@@ -72,65 +75,59 @@ private:
     sf::Text m_HighScoreMenu;
     sf::Text m_Prompt;
 
-    // Буфер — отложенный перезапуск/переход
+    // Settings menu
+    SettingsMainMenu m_SettingsMainMenu;
+    bool m_ShowSettings;
+
+    // State flags
     bool m_NeedRestart;
-
-    // Таймер перехода
     float m_TransitionTimer;
-
-    // Обработка
-    void processEvents();
-    void update(float dt);
-    void render();
-
-    // Состояния
-    void updateMenu(float dt);
-    void updatePlaying(float dt);
-    void updatePaused(float dt);
-    void updateGameOver(float dt);
-    void updateVictory(float dt);
-
-    void drawMenu();
-    void drawPlaying();
-    void drawOverlay(const std::string& title, const std::string& subtitle, sf::Color titleColor);
-
-    // Инициализация
-    void newGame();
-    void loadFloor(int floorNum);
-    void loadCurrentRoom();
-
-    void spawnRoomContent();
-    void onRoomCleared();
-
-    // Коллизии
-    void resolvePlayerWallCollision(sf::Vector2f desired);
-    void checkRoomTransitions();
-
-    // Атаки
-    void handlePlayerShoot();
-
-    // Высокий счёт
-    void loadHighScore();
-    void saveHighScore();
-
-    // Меню helpers
-    void setupMenuTexts();
-    void refreshMenuHighlight();
-
-    // Утилиты
-    sf::Vector2f worldMousePos() const;
-
-    // Флаг, нажата ли кнопка мыши (чтобы обработать только один раз для меню)
-    bool m_MousePressedPrev;
-    bool m_EnterPressedPrev;
-    bool m_PausePressedPrev;
-    bool m_InteractPressedPrev; // E
-
-    // Вход в босс-комнату: показать сообщение
     bool m_BossIntroShown;
-
     bool m_PortalActive;
     int m_PortalRoomIndex;
     sf::Vector2f m_PortalPos;
     sf::CircleShape m_PortalShape;
+
+    // Input state for menu navigation
+    bool m_MousePressedPrev;
+    bool m_EnterPressedPrev;
+    bool m_PausePressedPrev;
+    bool m_InteractPressedPrev;
+
+    // Event processing
+    void processEvents();
+    void update(float dt);
+    void render();
+
+    // Update functions for each state
+    void updatePlaying(float dt);
+
+    // Drawing functions
+    void drawMenu();
+    void drawPlaying();
+    void drawOverlay(const std::string& title, const std::string& subtitle, sf::Color titleColor);
+
+    // Game initialization
+    void newGame();
+    void loadFloor(int floorNum);
+    void loadCurrentRoom();
+    void spawnRoomContent();
+    void onRoomCleared();
+
+    // Collision handling
+    void resolvePlayerWallCollision(sf::Vector2f desired);
+    void checkRoomTransitions();
+
+    // Combat
+    void handlePlayerShoot();
+
+    // High score
+    void loadHighScore();
+    void saveHighScore();
+
+    // Menu helpers
+    void setupMenuTexts();
+    void refreshMenuHighlight();
+
+    void showUpgradeUI();
 };

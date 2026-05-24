@@ -37,22 +37,22 @@ void Level::linkNeighbors()
     for (size_t i = 0; i < m_Nodes.size(); ++i)
     {
         auto& n = m_Nodes[i];
-        n.neighbors[(int)Direction::NORTH] = indexAt(n.x, n.y - 1);
-        n.neighbors[(int)Direction::SOUTH] = indexAt(n.x, n.y + 1);
-        n.neighbors[(int)Direction::WEST]  = indexAt(n.x - 1, n.y);
-        n.neighbors[(int)Direction::EAST]  = indexAt(n.x + 1, n.y);
+        n.neighbors[0] = indexAt(n.x, n.y - 1); // NORTH
+        n.neighbors[1] = indexAt(n.x, n.y + 1); // SOUTH
+        n.neighbors[2] = indexAt(n.x - 1, n.y); // WEST
+        n.neighbors[3] = indexAt(n.x + 1, n.y); // EAST
     }
 }
 
 int Level::farthestFromStart(int startIdx) const
 {
-    // BFS по комнатам, выбираем максимально удалённую
     std::vector<int> dist(m_Nodes.size(), -1);
     std::queue<int> q;
     q.push(startIdx);
     dist[startIdx] = 0;
     int farthest = startIdx;
     int maxD = 0;
+
     while (!q.empty())
     {
         int cur = q.front(); q.pop();
@@ -76,18 +76,15 @@ void Level::generate(int floorNum, unsigned int seed)
     clearMap();
 
     std::mt19937 rng(seed);
-    // Количество комнат: 6–10 в зависимости от этажа
-    int targetCount = 6 + (floorNum - 1) + (int)(rng() % 3); // 6..10+
+    int targetCount = 6 + (floorNum - 1) + static_cast<int>(rng() % 3);
     targetCount = std::min(targetCount, 10);
 
     int startX = MAP_SIZE / 2;
     int startY = MAP_SIZE / 2;
     addRoom(startX, startY, RoomType::START);
 
-    // Случайное расширение: выбираем случайную существующую комнату,
-    // добавляем соседа в свободную клетку.
     int attempts = 0;
-    while ((int)m_Nodes.size() < targetCount && attempts < 1000)
+    while (static_cast<int>(m_Nodes.size()) < targetCount && attempts < 1000)
     {
         int idx = static_cast<int>(rng() % m_Nodes.size());
         auto base = m_Nodes[idx];
@@ -110,19 +107,18 @@ void Level::generate(int floorNum, unsigned int seed)
 
     linkNeighbors();
 
-    // Назначаем BOSS самой удалённой комнате
     int startIdx = m_Map[startY][startX];
     int bossIdx = farthestFromStart(startIdx);
     if (bossIdx != startIdx)
         m_Nodes[bossIdx].type = RoomType::BOSS;
 
-    // Выбираем 1 комнату для ITEM и (на 2 этаже) 1 для SHOP
     std::vector<int> candidates;
+    candidates.reserve(m_Nodes.size());
     for (size_t i = 0; i < m_Nodes.size(); ++i)
     {
-        if ((int)i != startIdx && (int)i != bossIdx
+        if (static_cast<int>(i) != startIdx && static_cast<int>(i) != bossIdx
             && m_Nodes[i].type == RoomType::NORMAL)
-            candidates.push_back((int)i);
+            candidates.push_back(static_cast<int>(i));
     }
     std::shuffle(candidates.begin(), candidates.end(), rng);
     if (!candidates.empty())
@@ -136,23 +132,21 @@ void Level::generate(int floorNum, unsigned int seed)
         candidates.pop_back();
     }
 
-    // Стартовая комната считается пройденной
     m_Current = startIdx;
     m_Nodes[m_Current].visited = true;
     m_Nodes[m_Current].cleared = true;
 }
 
-int Level::getRoomCount() const { return (int)m_Nodes.size(); }
+int Level::getRoomCount() const { return static_cast<int>(m_Nodes.size()); }
 int Level::getCurrentRoomIndex() const { return m_Current; }
 const RoomNode& Level::getCurrentNode() const { return m_Nodes[m_Current]; }
 RoomNode& Level::getCurrentNode() { return m_Nodes[m_Current]; }
 
 bool Level::moveInDirection(Direction dir, Direction& fromDir)
 {
-    int neighbor = m_Nodes[m_Current].neighbors[(int)dir];
+    int neighbor = m_Nodes[m_Current].neighbors[static_cast<int>(dir)];
     if (neighbor < 0) return false;
 
-    // Противоположное направление
     switch (dir)
     {
     case Direction::NORTH: fromDir = Direction::SOUTH; break;

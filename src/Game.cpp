@@ -2,6 +2,9 @@
 #include "AssetManager.h"
 #include "Utf.h"
 #include "Input.h"
+#include "Upgrade.h"
+#include "SettingsManager.h"
+#include "SettingsMenu.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -9,6 +12,16 @@
 #include <chrono>
 
 static const std::string HIGHSCORE_FILE = "highscore.txt";
+
+namespace {
+    inline float lengthSq(const sf::Vector2f& v) {
+        return v.x * v.x + v.y * v.y;
+    }
+
+    const sf::Color COLOR_OVERLAY_DARK(0, 0, 0, 170);
+    const sf::Color COLOR_MENU_SELECT(80, 80, 140);
+    const sf::Color COLOR_MENU_NORMAL(40, 40, 60);
+}
 
 Game::Game()
     : m_Window(sf::VideoMode(WIN_WIDTH, WIN_HEIGHT), "RPG Roguelike", sf::Style::Close | sf::Style::Titlebar)
@@ -22,21 +35,38 @@ Game::Game()
     , m_PortalActive(false)
     , m_PortalRoomIndex(-1)
     , m_PortalPos(0.f, 0.f)
+    , m_MousePressedPrev(false)
+    , m_EnterPressedPrev(false)
+    , m_PausePressedPrev(false)
+    , m_InteractPressedPrev(false)
+    , m_ShowSettings(false)
 {
     m_Window.setFramerateLimit(60);
     m_Window.setVerticalSyncEnabled(true);
 
     loadHighScore();
 
-    m_MenuItems = { "Новая игра", "Выход" };
+    m_MenuItems = { "New Game", "Settings", "Exit" };
     setupMenuTexts();
-
-    // Настройка портала
+    m_ShowSettings = false;
+    m_SettingsMainMenu.setOnCloseCallback([this]() {
+        m_ShowSettings = false;
+        m_State = GameState::MENU;
+        refreshMenuHighlight(); });
     m_PortalShape.setRadius(25.f);
     m_PortalShape.setOrigin(25.f, 25.f);
     m_PortalShape.setFillColor(sf::Color(100, 200, 255, 180));
     m_PortalShape.setOutlineColor(sf::Color(255, 255, 255));
     m_PortalShape.setOutlineThickness(2.f);
+
+    // Setup settings menu callbacks
+    m_SettingsMainMenu.setOnCloseCallback([this]() {
+        m_ShowSettings = false;
+        m_State = GameState::MENU;
+        });
+
+    // Apply saved graphics settings
+    SettingsManager::getInstance().applyGraphics(m_Window);
 }
 
 void Game::setupMenuTexts()
@@ -55,7 +85,7 @@ void Game::setupMenuTexts()
     m_Title.setPosition(WIN_WIDTH / 2.f, 150.f);
 
     m_Subtitle.setFont(font);
-    m_Subtitle.setString(u8("Курсовой проект на SFML"));
+    m_Subtitle.setString("SFML Roguelike Project");
     m_Subtitle.setCharacterSize(22);
     m_Subtitle.setFillColor(sf::Color(180, 180, 180));
     auto sb = m_Subtitle.getLocalBounds();
@@ -63,11 +93,12 @@ void Game::setupMenuTexts()
     m_Subtitle.setPosition(WIN_WIDTH / 2.f, 210.f);
 
     m_MenuTexts.clear();
+    m_MenuTexts.reserve(m_MenuItems.size());
     for (size_t i = 0; i < m_MenuItems.size(); ++i)
     {
         sf::Text t;
         t.setFont(font);
-        t.setString(u8(m_MenuItems[i]));
+        t.setString(m_MenuItems[i]);
         t.setCharacterSize(34);
         auto lb = t.getLocalBounds();
         t.setOrigin(lb.left + lb.width / 2.f, lb.top + lb.height / 2.f);
@@ -85,7 +116,7 @@ void Game::setupMenuTexts()
     m_Prompt.setFont(font);
     m_Prompt.setCharacterSize(18);
     m_Prompt.setFillColor(sf::Color(200, 200, 200));
-    m_Prompt.setString(u8("Управление: WASD/стрелки — движение, ЛКМ — стрелять, Space/Shift — рывок, Esc — пауза"));
+    m_Prompt.setString("Controls: WASD/Arrows - move, LMB - shoot, Space/Shift - dash, Esc - pause");
     auto pb = m_Prompt.getLocalBounds();
     m_Prompt.setOrigin(pb.left + pb.width / 2.f, pb.top + pb.height / 2.f);
     m_Prompt.setPosition(WIN_WIDTH / 2.f, 640.f);
@@ -108,7 +139,7 @@ void Game::refreshMenuHighlight()
             m_MenuTexts[i].setStyle(sf::Text::Regular);
         }
     }
-    m_HighScoreMenu.setString(u8("Рекорд: " + std::to_string(m_HighScore)));
+    m_HighScoreMenu.setString("Best: " + std::to_string(m_HighScore));
     auto hb = m_HighScoreMenu.getLocalBounds();
     m_HighScoreMenu.setOrigin(hb.left + hb.width / 2.f, hb.top + hb.height / 2.f);
     m_HighScoreMenu.setPosition(WIN_WIDTH / 2.f, 280.f);
@@ -120,7 +151,7 @@ void Game::run()
     while (m_Window.isOpen())
     {
         float dt = clock.restart().asSeconds();
-        if (dt > 0.1f) dt = 0.1f;
+        if (dt > 0.033f) dt = 0.033f;
 
         Input::update(m_Window);
 
@@ -139,10 +170,18 @@ void Game::processEvents()
         {
             m_Window.close();
         }
+
+        // Если настройки открыты - не обрабатываем другое нажатие
+        if (m_ShowSettings)
+        {
+            continue;
+        }
+
         if (e.type == sf::Event::KeyPressed)
         {
             if (m_State == GameState::MENU)
             {
+                // Обработка навигации по меню
                 if (e.key.code == sf::Keyboard::Up || e.key.code == sf::Keyboard::W)
                 {
                     m_MenuIndex = (m_MenuIndex + (int)m_MenuItems.size() - 1) % (int)m_MenuItems.size();
@@ -155,8 +194,20 @@ void Game::processEvents()
                 }
                 else if (e.key.code == sf::Keyboard::Enter || e.key.code == sf::Keyboard::Space)
                 {
-                    if (m_MenuIndex == 0) newGame();
-                    else if (m_MenuIndex == 1) m_Window.close();
+                    if (m_MenuIndex == 0)
+                    {
+                        newGame();
+                    }
+                    else if (m_MenuIndex == 1)
+                    {
+                        // Открываем настройки
+                        m_ShowSettings = true;
+                        m_SettingsMainMenu.show();
+                    }
+                    else if (m_MenuIndex == 2)
+                    {
+                        m_Window.close();
+                    }
                 }
                 else if (e.key.code == sf::Keyboard::Escape)
                 {
@@ -173,11 +224,8 @@ void Game::processEvents()
             }
             else if (m_State == GameState::PAUSED)
             {
-                if (e.key.code == sf::Keyboard::Up || e.key.code == sf::Keyboard::W)
-                {
-                    m_MenuIndex = (m_MenuIndex + 1) % 2;
-                }
-                else if (e.key.code == sf::Keyboard::Down || e.key.code == sf::Keyboard::S)
+                if (e.key.code == sf::Keyboard::Up || e.key.code == sf::Keyboard::W ||
+                    e.key.code == sf::Keyboard::Down || e.key.code == sf::Keyboard::S)
                 {
                     m_MenuIndex = (m_MenuIndex + 1) % 2;
                 }
@@ -207,7 +255,7 @@ void Game::processEvents()
         }
         if (e.type == sf::Event::MouseButtonPressed && e.mouseButton.button == sf::Mouse::Left)
         {
-            if (m_State == GameState::MENU)
+            if (m_State == GameState::MENU && !m_ShowSettings)
             {
                 sf::Vector2f mp(static_cast<float>(e.mouseButton.x),
                     static_cast<float>(e.mouseButton.y));
@@ -218,7 +266,13 @@ void Game::processEvents()
                         m_MenuIndex = (int)i;
                         refreshMenuHighlight();
                         if (i == 0) newGame();
-                        else if (i == 1) m_Window.close();
+                        else if (i == 1)
+                        {
+                            m_ShowSettings = true;
+                            m_SettingsMainMenu.show();
+                        }
+                        else if (i == 2) m_Window.close();
+                        break;
                     }
                 }
             }
@@ -228,121 +282,135 @@ void Game::processEvents()
 
 void Game::update(float dt)
 {
+    // Если настройки открыты - обновляем их и выходим
+    if (m_ShowSettings)
+    {
+        m_SettingsMainMenu.update(dt, m_Window);
+        SettingsManager::getInstance().update(dt, m_Window);
+        return;
+    }
+
     switch (m_State)
     {
-    case GameState::MENU:      updateMenu(dt); break;
+    case GameState::MENU:      break;
     case GameState::PLAYING:   updatePlaying(dt); break;
-    case GameState::PAUSED:    updatePaused(dt); break;
-    case GameState::GAME_OVER: updateGameOver(dt); break;
-    case GameState::VICTORY:   updateVictory(dt); break;
+    case GameState::PAUSED:    break;
+    case GameState::GAME_OVER: break;
+    case GameState::VICTORY:   break;
     }
 }
 
-void Game::updateMenu(float /*dt*/) { /* events only */ }
-void Game::updatePaused(float /*dt*/) { /* events only */ }
-void Game::updateGameOver(float /*dt*/) { /* events only */ }
-void Game::updateVictory(float /*dt*/) { /* events only */ }
-
 void Game::updatePlaying(float dt)
 {
-    m_HUD.tickMessage(dt);
+    const float dtClamped = std::min(dt, 0.033f);
 
+    m_HUD.tickMessage(dtClamped);
     m_Player.handleInput();
-    m_Player.update(dt);
-
+    m_Player.update(dtClamped);
     resolvePlayerWallCollision(m_Player.getDesiredDelta());
 
-    if (Input::isMouseButtonPressed(sf::Mouse::Left))
-    {
+    if (Input::isMouseButtonPressed(sf::Mouse::Left)) {
         handlePlayerShoot();
     }
 
-    int currentRoomIdx = m_Level.getCurrentRoomIndex();  // ← ДОБАВЬТЕ ЭТУ СТРОЧКУ
+    const int currentRoomIdx = m_Level.getCurrentRoomIndex();
 
-    // Обновление врагов
-    for (auto& e : m_Enemies)
-    {
-        if (!e->isAlive()) continue;
-        e->update(dt, m_Player.getPosition(), m_Projectiles, m_Room);
-        sf::Vector2f p = e->getPosition();
-        float margin = e->getRadius();
-        p.x = std::max(margin, std::min(p.x, static_cast<float>(Room::GRID_WIDTH * Room::TILE_SIZE) - margin));
-        p.y = std::max(margin, std::min(p.y, static_cast<float>(Room::GRID_HEIGHT * Room::TILE_SIZE) - margin));
-        e->setPosition(p);
-    }
+    // Update enemies
+    const int COLLISION_ITERATIONS = 2;
 
-    // Коллизии между врагами
-    const int COLLISION_ITERATIONS = 3;
     for (int iter = 0; iter < COLLISION_ITERATIONS; ++iter) {
         for (size_t i = 0; i < m_Enemies.size(); ++i) {
-            if (!m_Enemies[i]->isAlive()) continue;
-            sf::Vector2f pos1 = m_Enemies[i]->getPosition();
-            float r1 = m_Enemies[i]->getRadius();
+            auto& e = m_Enemies[i];
+            if (!e->isAlive()) continue;
 
+            e->update(dtClamped, m_Player.getPosition(), m_Projectiles, m_Room);
+
+            float margin = e->getRadius();
+            sf::Vector2f pos = e->getPosition();
+            pos.x = std::max(margin, std::min(pos.x,
+                static_cast<float>(Room::GRID_WIDTH * Room::TILE_SIZE) - margin));
+            pos.y = std::max(margin, std::min(pos.y,
+                static_cast<float>(Room::GRID_HEIGHT * Room::TILE_SIZE) - margin));
+            e->setPosition(pos);
+
+            // Enemy-enemy collisions
             for (size_t j = i + 1; j < m_Enemies.size(); ++j) {
-                if (!m_Enemies[j]->isAlive()) continue;
-                sf::Vector2f pos2 = m_Enemies[j]->getPosition();
-                float r2 = m_Enemies[j]->getRadius();
+                auto& e2 = m_Enemies[j];
+                if (!e2->isAlive()) continue;
 
-                sf::Vector2f delta = pos2 - pos1;
+                sf::Vector2f delta = e2->getPosition() - e->getPosition();
                 float distSq = delta.x * delta.x + delta.y * delta.y;
-                float minDist = r1 + r2;
+                float minDist = e->getRadius() + e2->getRadius();
+                float minDistSq = minDist * minDist;
 
-                if (distSq < minDist * minDist && distSq > 0.001f) {
+                if (distSq < minDistSq && distSq > 0.001f) {
                     float dist = std::sqrt(distSq);
                     sf::Vector2f normal = delta / dist;
                     float overlap = minDist - dist;
                     sf::Vector2f correction = normal * (overlap * 0.5f);
-                    m_Enemies[i]->setPosition(pos1 - correction);
-                    m_Enemies[j]->setPosition(pos2 + correction);
+                    e->setPosition(e->getPosition() - correction);
+                    e2->setPosition(e2->getPosition() + correction);
                 }
             }
         }
     }
 
-    // Снаряды
-    for (auto& p : m_Projectiles) p.update(dt);
+    // Update projectiles
+    for (auto& p : m_Projectiles) {
+        p.update(dtClamped);
+    }
 
-    sf::FloatRect pb = m_Player.getBounds();
-    for (auto& proj : m_Projectiles)
-    {
+    // Player projectiles vs enemies
+    for (auto& proj : m_Projectiles) {
         if (proj.isDead()) continue;
 
-        if (proj.isFromPlayer())
-        {
-            for (auto& e : m_Enemies)
-            {
+        if (proj.isFromPlayer()) {
+            for (auto& e : m_Enemies) {
                 if (!e->isAlive()) continue;
-                if (proj.getBounds().intersects(e->getBounds()))
-                {
+
+                if (proj.getBounds().intersects(e->getBounds())) {
                     e->takeDamage(static_cast<int>(proj.getDamage()));
                     e->flashHit();
-                    proj.kill();
-                    if (!e->isAlive())
-                    {
+
+                    if (!proj.canPierce()) {
+                        proj.kill();
+                    }
+
+                    if (!e->isAlive()) {
                         m_Score += e->getScoreValue();
-                        std::mt19937 rng(static_cast<unsigned>(
+                        m_Player.onEnemyKilled(e->getScoreValue());
+
+                        static std::mt19937 rng(static_cast<unsigned>(
                             std::chrono::steady_clock::now().time_since_epoch().count()));
-                        int roll = rng() % 100;
-                        if (e->getType() != EnemyType::BOSS && roll < 20)
-                        {
+                        if (e->getType() != EnemyType::BOSS && (rng() % 100) < 20) {
                             m_WorldItems.emplace_back(Item(ItemType::COIN, e->getPosition()), currentRoomIdx);
                         }
-                        break;
                     }
+
+                    break;
                 }
             }
         }
-        else
-        {
-            if (proj.getBounds().intersects(pb))
-            {
+    }
+
+    // Enemy projectiles vs player
+    sf::FloatRect playerBounds = m_Player.getBounds();
+    for (auto& proj : m_Projectiles) {
+        if (proj.isDead()) continue;
+
+        if (!proj.isFromPlayer()) {
+            if (proj.getBounds().intersects(playerBounds)) {
                 m_Player.damage(static_cast<int>(proj.getDamage()));
                 proj.kill();
                 if (!m_Player.isAlive()) break;
             }
         }
-        // Стены
+    }
+
+    // Projectiles vs walls
+    for (auto& proj : m_Projectiles) {
+        if (proj.isDead()) continue;
+
         sf::FloatRect bounds = proj.getBounds();
         if (m_Room.isSolid(bounds.left, bounds.top, false) ||
             m_Room.isSolid(bounds.left + bounds.width, bounds.top, false) ||
@@ -351,6 +419,8 @@ void Game::updatePlaying(float dt)
             proj.kill();
         }
     }
+
+    // Remove dead projectiles
     m_Projectiles.erase(std::remove_if(m_Projectiles.begin(), m_Projectiles.end(),
         [](const Projectile& p) {
             return p.isExpired() || p.isDead()
@@ -358,7 +428,7 @@ void Game::updatePlaying(float dt)
                 || p.getPosition().y < -50.f || p.getPosition().y > Room::GRID_HEIGHT * Room::TILE_SIZE + 50.f;
         }), m_Projectiles.end());
 
-    // Контактный урон
+    // Contact damage from enemies
     if (m_Player.isAlive())
     {
         for (auto& e : m_Enemies)
@@ -372,7 +442,7 @@ void Game::updatePlaying(float dt)
         }
     }
 
-    // Предметы
+    // Pick up items
     for (auto& wi : m_WorldItems)
     {
         if (wi.collected) continue;
@@ -389,18 +459,18 @@ void Game::updatePlaying(float dt)
                         m_Player.addCoins(-wi.item.getCost());
                         m_Player.applyItem(wi.item.getType());
                         wi.collected = true;
-                        m_HUD.setMessage("Куплено: " + Item::getDescription(wi.item.getType()));
+                        m_HUD.setMessage("Bought: " + Item::getDescription(wi.item.getType()));
                     }
                     else
                     {
-                        m_HUD.setMessage("Не хватает монет (" +
+                        m_HUD.setMessage("Not enough coins (" +
                             std::to_string(wi.item.getCost()) + ")", 1.5f);
                     }
                 }
                 else
                 {
-                    m_HUD.setMessage("E — купить за " +
-                        std::to_string(wi.item.getCost()) + " монет", 0.1f);
+                    m_HUD.setMessage("Press E to buy for " +
+                        std::to_string(wi.item.getCost()) + " coins", 0.1f);
                 }
             }
             else
@@ -413,7 +483,8 @@ void Game::updatePlaying(float dt)
             }
         }
     }
-    // Очистка комнаты
+
+    // Check room cleared
     if (!m_Level.getCurrentNode().cleared)
     {
         bool anyAlive = false;
@@ -424,22 +495,12 @@ void Game::updatePlaying(float dt)
         }
     }
 
-    // Переход между комнатами
     checkRoomTransitions();
 
-    // *** Портал: активен только в той комнате, где был открыт ***
-    if (m_PortalRoomIndex == m_Level.getCurrentRoomIndex())
-    {
-        m_PortalActive = true;
-    }
-    else
-    {
-        m_PortalActive = false;
-    }
-
+    // Portal
+    m_PortalActive = (m_PortalRoomIndex == m_Level.getCurrentRoomIndex());
     if (m_PortalActive)
     {
-        // Анимация пульсации
         float phase = std::sin(m_TransitionTimer * 6.f) * 0.2f + 0.8f;
         m_PortalShape.setScale(phase, phase);
         m_PortalShape.setPosition(m_PortalPos);
@@ -464,7 +525,36 @@ void Game::updatePlaying(float dt)
         }
     }
 
-    // Смерть игрока
+    // Upgrade system
+    if (m_Player.getExpSystem().hasPendingUpgrade() && !m_UpgradeUI.isActive())
+    {
+        auto choices = m_Player.getExpSystem().getUpgradeChoices(3);
+        if (!choices.empty())
+        {
+            m_UpgradeUI.show(choices);
+            // Эффект паузы игры при выборе улучшения
+            m_TransitionTimer = 0.f;
+        }
+    }
+
+    m_UpgradeUI.update(dtClamped);
+
+    if (m_UpgradeUI.isActive())
+    {
+        UpgradeType selected = m_UpgradeUI.handleInput(m_Window);
+        if (!m_UpgradeUI.isActive()) // UI закрылся после выбора
+        {
+            m_Player.applyUpgrade(selected);
+            m_Player.getExpSystem().clearPendingUpgrade();
+
+            // Визуальный фидбек
+            m_HUD.setMessage("✦ " + Upgrade::getInfo(selected).name + " ✦", 2.5f);
+
+            // Можно добавить визуальный эффект (вспышка, партиклы)
+        }
+    }
+
+    // Check player death
     if (!m_Player.isAlive())
     {
         if (m_Score > m_HighScore)
@@ -475,7 +565,7 @@ void Game::updatePlaying(float dt)
         m_State = GameState::GAME_OVER;
     }
 
-    m_TransitionTimer += dt;
+    m_TransitionTimer += dtClamped;
     m_HUD.update(m_Player, m_Score, m_HighScore, m_Level);
 }
 
@@ -539,10 +629,12 @@ void Game::newGame()
     m_Score = 0;
     m_Projectiles.clear();
     m_Enemies.clear();
-    m_WorldItems.clear();  // ← ВМЕСТО m_Items.clear()
+    m_WorldItems.clear();
     m_BossIntroShown = false;
     m_PortalActive = false;
     m_PortalRoomIndex = -1;
+    m_UpgradeUI.hide();
+    m_ShowSettings = false;
 
     loadFloor(1);
     m_State = GameState::PLAYING;
@@ -559,7 +651,7 @@ void Game::loadFloor(int floorNum)
 
     sf::Vector2f center = m_Room.getCenter();
     m_Player.setPosition(center);
-    m_HUD.setMessage("Этаж " + std::to_string(floorNum));
+    m_HUD.setMessage("Floor " + std::to_string(floorNum));
 }
 
 void Game::loadCurrentRoom()
@@ -571,7 +663,6 @@ void Game::loadCurrentRoom()
     RoomType type = m_Level.getCurrentNode().type;
     int currentRoomIdx = m_Level.getCurrentRoomIndex();
 
-    // Генерируем комнату
     unsigned int roomSeed = static_cast<unsigned int>(
         currentRoomIdx * 131
         + m_Level.getFloorNumber() * 977
@@ -581,8 +672,7 @@ void Game::loadCurrentRoom()
 
     m_Room.generate(type, doors, roomSeed);
 
-    // Очищаем временные предметы (которые на полу в текущей комнате)
-    // НО НЕ УДАЛЯЕМ ИЗ m_WorldItems!
+    // Clean up collected items
     for (auto it = m_WorldItems.begin(); it != m_WorldItems.end(); )
     {
         if (it->roomIndex == currentRoomIdx && it->collected)
@@ -595,10 +685,8 @@ void Game::loadCurrentRoom()
         }
     }
 
-    // Спавним новые предметы только если комната не очищена
     if (!m_Level.getCurrentNode().cleared)
     {
-        // Проверяем, есть ли уже предметы в этой комнате
         bool hasItems = false;
         for (auto& wi : m_WorldItems)
         {
@@ -615,22 +703,20 @@ void Game::loadCurrentRoom()
         }
     }
 
-    // Блокируем двери
     m_Room.setDoorsLocked(!m_Level.getCurrentNode().cleared);
 
-    // Сообщения
     if (type == RoomType::BOSS && !m_Level.getCurrentNode().cleared && !m_BossIntroShown)
     {
-        m_HUD.setMessage("БОСС! Подготовьтесь.", 2.5f);
+        m_HUD.setMessage("BOSS! Prepare yourself.", 2.5f);
         m_BossIntroShown = true;
     }
     else if (type == RoomType::SHOP)
     {
-        m_HUD.setMessage("Магазин: подойдите к предмету и нажмите E", 2.5f);
+        m_HUD.setMessage("Shop: Approach item and press E", 2.5f);
     }
     else if (type == RoomType::ITEM)
     {
-        m_HUD.setMessage("Комната с предметом", 1.5f);
+        m_HUD.setMessage("Item Room", 1.5f);
     }
 }
 
@@ -646,7 +732,6 @@ void Game::spawnRoomContent()
     int floor = m_Level.getFloorNumber();
     int currentRoomIdx = m_Level.getCurrentRoomIndex();
 
-    // Вспомогательная лямбда для получения радиуса врага
     auto getEnemyRadius = [](EnemyType et) -> float {
         switch (et) {
         case EnemyType::SLIME:     return 20.f;
@@ -679,13 +764,6 @@ void Game::spawnRoomContent()
     else if (type == RoomType::BOSS && !m_Level.getCurrentNode().cleared)
     {
         sf::Vector2f c = m_Room.getCenter();
-        float bossRadius = getEnemyRadius(EnemyType::BOSS);
-        sf::FloatRect bossBox(c.x - bossRadius, c.y - 80.f - bossRadius,
-            bossRadius * 2.f, bossRadius * 2.f);
-        if (m_Room.isRectSolid(bossBox))
-        {
-            c.y -= bossRadius;
-        }
         m_Enemies.push_back(std::make_unique<Enemy>(EnemyType::BOSS, c.x, c.y - 80.f, floor));
     }
     else if (type == RoomType::ITEM && !m_Level.getCurrentNode().cleared)
@@ -725,20 +803,19 @@ void Game::onRoomCleared()
     if (type == RoomType::BOSS)
     {
         m_Score += 100;
+        m_Player.getExpSystem().addExperience(200);
         auto c = m_Room.getCenter();
 
-        // ИСПРАВЛЕНО: используем m_WorldItems вместо m_Items
         m_WorldItems.emplace_back(Item(ItemType::HEALTH, c), currentRoomIdx);
 
-        // Активация портала в этой комнате
         m_PortalRoomIndex = m_Level.getCurrentRoomIndex();
         m_PortalActive = true;
         m_PortalPos = c + sf::Vector2f(0.f, -50.f);
-        m_HUD.setMessage("Портал открыт! Идите к нему, чтобы перейти на следующий этаж.", 3.f);
+        m_HUD.setMessage("Portal opened! Go to next floor.", 3.f);
     }
     else
     {
-        m_HUD.setMessage("Комната пройдена (+50)", 1.2f);
+        m_HUD.setMessage("Room cleared (+50)", 1.2f);
     }
 }
 
@@ -746,39 +823,45 @@ void Game::render()
 {
     m_Window.clear(sf::Color(18, 16, 24));
 
-    if (m_State == GameState::MENU)
+    if (m_State == GameState::MENU && !m_ShowSettings)
     {
         drawMenu();
     }
-    else
+    else if (!m_ShowSettings)
     {
         drawPlaying();
         if (m_State == GameState::PAUSED)
         {
-            drawOverlay("ПАУЗА", "Enter — продолжить, Esc — в меню",
+            drawOverlay("PAUSED", "Enter - resume, Esc - menu",
                 sf::Color(230, 230, 230));
         }
         else if (m_State == GameState::GAME_OVER)
         {
             drawOverlay("GAME OVER",
-                "Счёт: " + std::to_string(m_Score) +
-                "   Рекорд: " + std::to_string(m_HighScore) +
-                "\nEnter — начать заново, Esc — в меню",
+                "Score: " + std::to_string(m_Score) +
+                "   Best: " + std::to_string(m_HighScore) +
+                "\nEnter - new game, Esc - menu",
                 sf::Color(230, 80, 80));
         }
         else if (m_State == GameState::VICTORY)
         {
-            drawOverlay("ПОБЕДА!",
-                "Счёт: " + std::to_string(m_Score) +
-                "   Рекорд: " + std::to_string(m_HighScore) +
-                "\nEnter — заново, Esc — в меню",
+            drawOverlay("VICTORY!",
+                "Score: " + std::to_string(m_Score) +
+                "   Best: " + std::to_string(m_HighScore) +
+                "\nEnter - new game, Esc - menu",
                 sf::Color(120, 240, 140));
         }
     }
 
+    // Рисуем настройки поверх всего
+    if (m_ShowSettings)
+    {
+        m_SettingsMainMenu.draw(m_Window);
+        SettingsManager::getInstance().draw(m_Window);
+    }
+
     m_Window.display();
 }
-
 void Game::drawMenu()
 {
     if (!AssetManager::instance().isFontLoaded())
@@ -791,9 +874,7 @@ void Game::drawMenu()
             sf::RectangleShape btn({ 300.f, 50.f });
             btn.setOrigin(150.f, 25.f);
             btn.setPosition(WIN_WIDTH / 2.f, 340.f + i * 60.f);
-            btn.setFillColor((int)i == m_MenuIndex
-                ? sf::Color(80, 80, 140)
-                : sf::Color(40, 40, 60));
+            btn.setFillColor((int)i == m_MenuIndex ? COLOR_MENU_SELECT : COLOR_MENU_NORMAL);
             m_Window.draw(btn);
         }
         return;
@@ -810,7 +891,6 @@ void Game::drawPlaying()
 {
     m_Room.draw(m_Window);
 
-    // Рисуем только предметы из текущей комнаты
     int currentRoomIdx = m_Level.getCurrentRoomIndex();
     for (auto& wi : m_WorldItems)
     {
@@ -825,12 +905,15 @@ void Game::drawPlaying()
     m_Player.draw(m_Window);
     if (m_PortalActive) m_Window.draw(m_PortalShape);
     m_HUD.draw(m_Window);
+
+    if (m_UpgradeUI.isActive())
+        m_UpgradeUI.draw(m_Window);
 }
 
 void Game::drawOverlay(const std::string& title, const std::string& subtitle, sf::Color titleColor)
 {
     sf::RectangleShape overlay({ (float)WIN_WIDTH, (float)WIN_HEIGHT });
-    overlay.setFillColor(sf::Color(0, 0, 0, 170));
+    overlay.setFillColor(COLOR_OVERLAY_DARK);
     m_Window.draw(overlay);
 
     if (!AssetManager::instance().isFontLoaded()) return;
@@ -838,7 +921,7 @@ void Game::drawOverlay(const std::string& title, const std::string& subtitle, sf
 
     sf::Text t;
     t.setFont(font);
-    t.setString(u8(title));
+    t.setString(title);
     t.setCharacterSize(72);
     t.setFillColor(titleColor);
     t.setOutlineColor(sf::Color::Black);
@@ -850,7 +933,7 @@ void Game::drawOverlay(const std::string& title, const std::string& subtitle, sf
 
     sf::Text s;
     s.setFont(font);
-    s.setString(u8(subtitle));
+    s.setString(subtitle);
     s.setCharacterSize(22);
     s.setFillColor(sf::Color(230, 230, 230));
     auto sb = s.getLocalBounds();
@@ -860,12 +943,12 @@ void Game::drawOverlay(const std::string& title, const std::string& subtitle, sf
 
     if (m_State == GameState::PAUSED)
     {
-        const char* items[] = { "Продолжить", "Выйти в меню" };
+        const char* items[] = { "Resume", "Exit to menu" };
         for (int i = 0; i < 2; ++i)
         {
             sf::Text mi;
             mi.setFont(font);
-            mi.setString(u8(items[i]));
+            mi.setString(items[i]);
             mi.setCharacterSize(28);
             mi.setFillColor(i == m_MenuIndex ? sf::Color(255, 220, 100) : sf::Color(200, 200, 200));
             auto lb = mi.getLocalBounds();
@@ -896,5 +979,20 @@ void Game::saveHighScore()
     if (f.is_open())
     {
         f << m_HighScore;
+    }
+}
+
+void Game::showUpgradeUI()
+{
+    auto choices = m_Player.getExpSystem().getUpgradeChoices(3);
+    if (!choices.empty())
+    {
+        m_UpgradeUI.show(choices);
+
+        // Визуальный эффект при открытии
+        m_TransitionTimer = 0.f;
+
+        // Создаем партиклы или звук (опционально)
+        // Например, можно добавить звук получения уровня
     }
 }

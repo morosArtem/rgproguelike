@@ -6,7 +6,6 @@ HUD::HUD()
     : m_MessageTimer(0.f)
     , m_FontReady(AssetManager::instance().isFontLoaded())
 {
-    // HP bar
     m_HpBarBg.setSize({ 240.f, 22.f });
     m_HpBarBg.setFillColor(sf::Color(30, 30, 30, 200));
     m_HpBarBg.setOutlineColor(sf::Color::White);
@@ -20,7 +19,6 @@ HUD::HUD()
     if (m_FontReady)
     {
         const auto& font = AssetManager::instance().getFont();
-
         m_HpText.setFont(font);
         m_HpText.setCharacterSize(14);
         m_HpText.setFillColor(sf::Color::White);
@@ -54,29 +52,31 @@ HUD::HUD()
 
 void HUD::update(const Player& player, int score, int highScore, const Level& level)
 {
-    float frac = (player.getMaxHP() > 0)
-        ? static_cast<float>(player.getHP()) / player.getMaxHP()
-        : 0.f;
+    float frac = static_cast<float>(player.getHP()) / static_cast<float>(player.getMaxHP());
     if (frac < 0.f) frac = 0.f;
     m_HpBarFill.setSize({ 240.f * frac, 22.f });
 
     if (m_FontReady)
     {
-        m_HpText.setString("HP: " + std::to_string(player.getHP()) + " / "
-                           + std::to_string(player.getMaxHP()));
+        // Используем std::to_string, но можно добавить буфер для ещё большей скорости
+        m_HpText.setString("HP: " + std::to_string(player.getHP()) + " / " + std::to_string(player.getMaxHP()));
         m_ScoreText.setString("Score: " + std::to_string(score));
         m_HighScoreText.setString("Best: " + std::to_string(highScore));
         m_FloorText.setString("Floor " + std::to_string(level.getFloorNumber()));
         m_CoinText.setString("Coins: " + std::to_string(player.getCoins()));
     }
 
-    // Иконки активных предметов
+    // Иконки предметов
+    const auto& items = player.getItems();
     m_ItemIcons.clear();
     m_ItemLabels.clear();
-    const auto& items = player.getItems();
+    m_ItemIcons.reserve(items.size());
+    m_ItemLabels.reserve(items.size());
+
     float x = 16.f;
     float y = 120.f;
-    int idx = 0;
+    size_t idx = 0;
+
     for (auto type : items)
     {
         sf::RectangleShape icon({ 26.f, 26.f });
@@ -84,7 +84,7 @@ void HUD::update(const Player& player, int score, int highScore, const Level& le
         icon.setFillColor(Item::getColor(type));
         icon.setOutlineColor(sf::Color::White);
         icon.setOutlineThickness(1.f);
-        m_ItemIcons.push_back(icon);
+        m_ItemIcons.push_back(std::move(icon));
 
         if (m_FontReady)
         {
@@ -96,35 +96,42 @@ void HUD::update(const Player& player, int score, int highScore, const Level& le
             auto lb = t.getLocalBounds();
             t.setOrigin(lb.left + lb.width / 2.f, lb.top + lb.height / 2.f);
             t.setPosition(x + idx * 32.f + 13.f, y + 13.f);
-            m_ItemLabels.push_back(t);
+            m_ItemLabels.push_back(std::move(t));
         }
         idx++;
     }
 
-    // Миникарта: правый верхний угол
-    m_MinimapCells.clear();
+    // Миникарта
     const auto& nodes = level.getNodes();
-    int curIdx = level.getCurrentRoomIndex();
     if (!nodes.empty())
     {
-        // Найти bbox
         int minX = 999, minY = 999, maxX = -999, maxY = -999;
-        for (auto& n : nodes)
+        for (const auto& n : nodes)
         {
-            minX = std::min(minX, n.x); minY = std::min(minY, n.y);
-            maxX = std::max(maxX, n.x); maxY = std::max(maxY, n.y);
+            if (n.x < minX) minX = n.x;
+            if (n.y < minY) minY = n.y;
+            if (n.x > maxX) maxX = n.x;
+            if (n.y > maxY) maxY = n.y;
         }
+
         const float cell = 18.f;
         const float pad = 3.f;
         float baseX = 1280.f - (maxX - minX + 1) * (cell + pad) - 16.f;
         float baseY = 56.f;
+
+        m_MinimapCells.clear();
+        m_MinimapCells.reserve(nodes.size());
+
+        int curIdx = level.getCurrentRoomIndex();
 
         for (size_t i = 0; i < nodes.size(); ++i)
         {
             const auto& n = nodes[i];
             sf::RectangleShape r({ cell, cell });
             r.setPosition(baseX + (n.x - minX) * (cell + pad),
-                          baseY + (n.y - minY) * (cell + pad));
+                baseY + (n.y - minY) * (cell + pad));
+
+            // Быстрый выбор цвета через switch
             sf::Color c;
             switch (n.type)
             {
@@ -134,21 +141,14 @@ void HUD::update(const Player& player, int score, int highScore, const Level& le
             case RoomType::BOSS:   c = sf::Color(220, 60, 60);   break;
             default:               c = sf::Color(120, 120, 120); break;
             }
+
             if (!n.visited)
                 c = sf::Color(40, 40, 40, 180);
 
             r.setFillColor(c);
-            if ((int)i == curIdx)
-            {
-                r.setOutlineColor(sf::Color::White);
-                r.setOutlineThickness(2.f);
-            }
-            else
-            {
-                r.setOutlineColor(sf::Color(20, 20, 20));
-                r.setOutlineThickness(1.f);
-            }
-            m_MinimapCells.push_back(r);
+            r.setOutlineColor((int)i == curIdx ? sf::Color::White : sf::Color(20, 20, 20));
+            r.setOutlineThickness((int)i == curIdx ? 2.f : 1.f);
+            m_MinimapCells.push_back(std::move(r));
         }
     }
 }
@@ -157,8 +157,9 @@ void HUD::draw(sf::RenderWindow& window)
 {
     window.draw(m_HpBarBg);
     window.draw(m_HpBarFill);
-    for (auto& icon : m_ItemIcons) window.draw(icon);
-    for (auto& cell : m_MinimapCells) window.draw(cell);
+
+    for (const auto& icon : m_ItemIcons) window.draw(icon);
+    for (const auto& cell : m_MinimapCells) window.draw(cell);
 
     if (m_FontReady)
     {
@@ -167,7 +168,7 @@ void HUD::draw(sf::RenderWindow& window)
         window.draw(m_HighScoreText);
         window.draw(m_FloorText);
         window.draw(m_CoinText);
-        for (auto& t : m_ItemLabels) window.draw(t);
+        for (const auto& t : m_ItemLabels) window.draw(t);
         if (m_MessageTimer > 0.f) window.draw(m_Message);
     }
 }

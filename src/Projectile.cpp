@@ -1,13 +1,14 @@
 #include "Projectile.h"
 
 Projectile::Projectile(sf::Vector2f pos, sf::Vector2f velocity,
-                       float damage, bool fromPlayer, sf::Color color)
+    float damage, bool fromPlayer, sf::Color color)
     : m_Position(pos)
     , m_Velocity(velocity)
     , m_Damage(damage)
     , m_FromPlayer(fromPlayer)
     , m_Dead(false)
     , m_Lifetime(0.f)
+    , m_CanPierce(false)
 {
     float radius = fromPlayer ? 5.f : 4.f;
     m_Shape.setRadius(radius);
@@ -35,7 +36,7 @@ sf::FloatRect Projectile::getBounds() const
 
 bool Projectile::isExpired() const
 {
-    return m_Lifetime >= MAX_LIFETIME || m_Dead;
+    return m_Lifetime >= MAX_LIFETIME;
 }
 
 void Projectile::kill()

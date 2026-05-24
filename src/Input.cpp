@@ -1,7 +1,7 @@
 #include "Input.h"
+#include "SettingsManager.h"
 #include <cmath>
 
-// Статические члены
 bool Input::m_CurrentKeys[sf::Keyboard::KeyCount];
 bool Input::m_PreviousKeys[sf::Keyboard::KeyCount];
 bool Input::m_CurrentMouse[sf::Mouse::ButtonCount];
@@ -19,18 +19,22 @@ void Input::update(const sf::RenderWindow& window)
 
 void Input::updateKeys()
 {
+    // Copy current to previous
     for (int i = 0; i < sf::Keyboard::KeyCount; ++i)
         m_PreviousKeys[i] = m_CurrentKeys[i];
 
+    // Update current states
     for (int i = 0; i < sf::Keyboard::KeyCount; ++i)
         m_CurrentKeys[i] = sf::Keyboard::isKeyPressed(static_cast<sf::Keyboard::Key>(i));
 }
 
 void Input::updateMouse(const sf::RenderWindow& window)
 {
+    // Copy current to previous
     for (int i = 0; i < sf::Mouse::ButtonCount; ++i)
         m_PreviousMouse[i] = m_CurrentMouse[i];
 
+    // Update current states
     for (int i = 0; i < sf::Mouse::ButtonCount; ++i)
         m_CurrentMouse[i] = sf::Mouse::isButtonPressed(static_cast<sf::Mouse::Button>(i));
 
@@ -40,12 +44,15 @@ void Input::updateMouse(const sf::RenderWindow& window)
 
 bool Input::isKeyPressed(sf::Keyboard::Key key)
 {
+    if (key == sf::Keyboard::Unknown) return false;
     return m_CurrentKeys[static_cast<int>(key)];
 }
 
 bool Input::isKeyJustPressed(sf::Keyboard::Key key)
 {
-    return m_CurrentKeys[static_cast<int>(key)] && !m_PreviousKeys[static_cast<int>(key)];
+    if (key == sf::Keyboard::Unknown) return false;
+    int idx = static_cast<int>(key);
+    return m_CurrentKeys[idx] && !m_PreviousKeys[idx];
 }
 
 bool Input::isMouseButtonPressed(sf::Mouse::Button button)
@@ -55,7 +62,8 @@ bool Input::isMouseButtonPressed(sf::Mouse::Button button)
 
 bool Input::isMouseButtonJustPressed(sf::Mouse::Button button)
 {
-    return m_CurrentMouse[static_cast<int>(button)] && !m_PreviousMouse[static_cast<int>(button)];
+    int idx = static_cast<int>(button);
+    return m_CurrentMouse[idx] && !m_PreviousMouse[idx];
 }
 
 sf::Vector2i Input::getMousePosition()
@@ -71,12 +79,49 @@ sf::Vector2f Input::getMouseWorldPosition()
 sf::Vector2f Input::getMovementDirection()
 {
     sf::Vector2f dir(0.f, 0.f);
-    if (isKeyPressed(sf::Keyboard::W) || isKeyPressed(sf::Keyboard::Up))    dir.y -= 1.f;
-    if (isKeyPressed(sf::Keyboard::S) || isKeyPressed(sf::Keyboard::Down))  dir.y += 1.f;
-    if (isKeyPressed(sf::Keyboard::A) || isKeyPressed(sf::Keyboard::Left))  dir.x -= 1.f;
-    if (isKeyPressed(sf::Keyboard::D) || isKeyPressed(sf::Keyboard::Right)) dir.x += 1.f;
 
-    float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
-    if (len > 0.f) dir /= len;
+    // Get keys from settings manager (for rebindable controls)
+    auto& settings = SettingsManager::getInstance();
+
+    if (isKeyPressed(settings.getKeyForAction(ControlAction::MOVE_UP)))    dir.y -= 1.f;
+    if (isKeyPressed(settings.getKeyForAction(ControlAction::MOVE_DOWN)))  dir.y += 1.f;
+    if (isKeyPressed(settings.getKeyForAction(ControlAction::MOVE_LEFT)))  dir.x -= 1.f;
+    if (isKeyPressed(settings.getKeyForAction(ControlAction::MOVE_RIGHT))) dir.x += 1.f;
+
+    if (dir.x != 0.f || dir.y != 0.f)
+    {
+        float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+        dir.x /= len;
+        dir.y /= len;
+    }
     return dir;
+}
+
+bool Input::isDashPressed()
+{
+    auto& settings = SettingsManager::getInstance();
+    return isKeyPressed(settings.getKeyForAction(ControlAction::DASH));
+}
+
+bool Input::isInteractPressed()
+{
+    auto& settings = SettingsManager::getInstance();
+    return isKeyPressed(settings.getKeyForAction(ControlAction::INTERACT));
+}
+
+bool Input::isInteractJustPressed()
+{
+    auto& settings = SettingsManager::getInstance();
+    return isKeyJustPressed(settings.getKeyForAction(ControlAction::INTERACT));
+}
+
+bool Input::isPausePressed()
+{
+    auto& settings = SettingsManager::getInstance();
+    return isKeyJustPressed(settings.getKeyForAction(ControlAction::PAUSE));
+}
+
+bool Input::isShootPressed()
+{
+    return isMouseButtonPressed(sf::Mouse::Left);
 }

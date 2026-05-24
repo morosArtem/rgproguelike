@@ -2,6 +2,7 @@
 #include "Entity.h"
 #include "Projectile.h"
 #include "Item.h"
+#include "ExperienceSystem.h"
 #include <vector>
 
 class Player : public Entity
@@ -33,6 +34,22 @@ public:
     bool isDashing() const;
     bool isInvincible() const;
 
+    ExperienceSystem& getExpSystem() { return m_ExpSystem; }
+    const PlayerStats& getStats() const { return m_Stats; }
+    PlayerStats& getStats() { return m_Stats; }
+
+    void applyUpgrade(UpgradeType type);
+    void updateRegeneration(float dt);
+    void onEnemyKilled(int scoreValue);
+    bool canCrit() const;
+    float getGreedMultiplier() const;
+    void resetStats();
+
+    float getModifiedDamage() const;
+    float getModifiedSpeed() const;
+    float getModifiedFireRate() const;
+    int getModifiedMaxHP() const;
+
 private:
     sf::RectangleShape m_Shape;
     sf::Vector2f m_Desired;
@@ -54,4 +71,8 @@ private:
 
     bool m_HasShield;
     std::vector<ItemType> m_Items;
+
+    ExperienceSystem m_ExpSystem;
+    PlayerStats m_Stats;
+    float m_RegenAccumulator;
 };

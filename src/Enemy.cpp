@@ -47,14 +47,14 @@ Enemy::Enemy(EnemyType type, float x, float y, int difficulty)
 }
 
 void Enemy::setupByType(int difficulty) {
-    float diffMul = 1.f + 0.2f * static_cast<float>(difficulty - 1); // снижен множитель сложности
+    float diffMul = 1.f + 0.2f * static_cast<float>(difficulty - 1);
 
     switch (m_Type) {
     case EnemyType::SLIME:
         m_MaxHP = static_cast<int>(60 * diffMul);
         m_HP = m_MaxHP;
-        m_Speed = 120.f;            // было 150
-        m_Damage = 10.f * diffMul;  // было 12
+        m_Speed = 120.f;
+        m_Damage = 10.f * diffMul;
         m_DetectionRadius = 450.f;
         m_AttackCooldown = 0.f;
         m_Radius = 20.f;
@@ -63,8 +63,8 @@ void Enemy::setupByType(int difficulty) {
     case EnemyType::SHOOTER:
         m_MaxHP = static_cast<int>(45 * diffMul);
         m_HP = m_MaxHP;
-        m_Speed = 60.f;             // было 70
-        m_Damage = 7.f * diffMul;   // было 8
+        m_Speed = 60.f;
+        m_Damage = 7.f * diffMul;
         m_DetectionRadius = 520.f;
         m_AttackCooldown = 1.5f;
         m_PreferredDistance = 260.f;
@@ -74,18 +74,18 @@ void Enemy::setupByType(int difficulty) {
     case EnemyType::BERSERKER:
         m_MaxHP = static_cast<int>(85 * diffMul);
         m_HP = m_MaxHP;
-        m_Speed = 140.f;            // было 165
-        m_Damage = 18.f * diffMul;  // было 22
+        m_Speed = 140.f;
+        m_Damage = 18.f * diffMul;
         m_DetectionRadius = 400.f;
         m_AttackCooldown = 2.0f;
         m_Radius = 24.f;
         m_ScoreValue = 20;
         break;
     case EnemyType::BOSS:
-        m_MaxHP = static_cast<int>(350 * diffMul); // было 400
+        m_MaxHP = static_cast<int>(350 * diffMul);
         m_HP = m_MaxHP;
         m_Speed = 90.f;
-        m_Damage = 18.f * diffMul;  // было 20
+        m_Damage = 18.f * diffMul;
         m_DetectionRadius = 1000.f;
         m_AttackCooldown = 1.8f;
         m_Radius = 42.f;
@@ -104,7 +104,6 @@ void Enemy::update(float dt, sf::Vector2f playerPos, std::vector<Projectile>& ou
     sf::Vector2f diff = playerPos - m_Position;
     float dist = std::sqrt(diff.x * diff.x + diff.y * diff.y);
 
-    // Убрана проверка detectionRadius – враги преследуют всегда
     sf::Vector2f dir(0.f, 0.f);
     if (dist > 1e-4f) dir = diff / dist;
 
@@ -168,7 +167,6 @@ void Enemy::update(float dt, sf::Vector2f playerPos, std::vector<Projectile>& ou
         break;
     }
 
-    // Скольжение вдоль стен с замедлением
     if (desired != sf::Vector2f(0.f, 0.f)) {
         sf::Vector2f newPos = m_Position + desired;
         sf::FloatRect newBounds(newPos.x - m_Radius, newPos.y - m_Radius,
@@ -181,13 +179,13 @@ void Enemy::update(float dt, sf::Vector2f playerPos, std::vector<Projectile>& ou
                 m_Position.y - m_Radius,
                 m_Radius * 2.f, m_Radius * 2.f);
             if (room.isRectSolid(boundsX))
-                allowed.x = 0,2.f;
+                allowed.x = 0.0f;  // ИСПРАВЛЕНО
 
             sf::FloatRect boundsY(m_Position.x + allowed.x - m_Radius,
                 m_Position.y + desired.y - m_Radius,
                 m_Radius * 2.f, m_Radius * 2.f);
             if (room.isRectSolid(boundsY))
-                allowed.y = 0,2.f;
+                allowed.y = 0.0f;  // ИСПРАВЛЕНО
 
             if (allowed.x != 0.f || allowed.y != 0.f) {
                 constexpr float WALL_FRICTION = 0.6f;
